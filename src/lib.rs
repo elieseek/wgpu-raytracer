@@ -8,6 +8,7 @@ use winit::{
 use compute_pass::ComputePass;
 use render_pass::RenderPass;
 
+mod camera;
 mod compute_pass;
 mod render_pass;
 
@@ -15,6 +16,9 @@ pub async fn run() {
     env_logger::init();
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+    window.set_title("Raytracer");
+    window.set_inner_size(winit::dpi::PhysicalSize::new(1600, 900));
 
     let mut state = State::new(&window).await;
 
@@ -75,6 +79,9 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
     output: wgpu::Texture,
     output_view: wgpu::TextureView,
+    camera: camera::Camera,
+    camera_uniform: camera::CameraUniform,
+    camera_controller: camera::CameraController,
     compute_pass: ComputePass,
     render_pass: RenderPass,
 }
@@ -128,9 +135,20 @@ impl State {
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         });
 
+        let camera = camera::Camera::new(
+            (0.0, 0.0, 0.0).into(),
+            (0.0, 0.0, -1.0).into(),
+            cgmath::Vector3::unit_y(),
+            70.0,
+            16.0 / 9.0,
+        );
+
+        let camera_uniform = camera.get_uniform();
+        let camera_controller = camera::CameraController::new(0.1);
+
         let output_view = output.create_view(&Default::default());
 
-        let compute_pass = ComputePass::new(&device, &size, &output_view);
+        let compute_pass = ComputePass::new(&device, &size, &output_view, &camera_uniform);
         let render_pass = RenderPass::new(&device, format, &output_view);
 
         Self {
@@ -141,6 +159,9 @@ impl State {
             size,
             output,
             output_view,
+            camera,
+            camera_uniform,
+            camera_controller,
             compute_pass,
             render_pass,
         }
@@ -195,11 +216,15 @@ impl State {
         }
     }
 
-    fn input(&mut self, _event: &WindowEvent) -> bool {
-        false
+    fn input(&mut self, event: &WindowEvent) -> bool {
+        self.camera_controller.process_events(event)
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        self.camera_controller.update_camera(&mut self.camera);
+        self.camera_uniform = self.camera.get_uniform();
+        self.compute_pass.update(&self.queue, self.camera_uniform);
+    }
 }
 
 #[repr(C)]
