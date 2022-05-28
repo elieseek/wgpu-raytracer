@@ -1,6 +1,6 @@
 use std::mem;
 
-use wgpu::{BufferUsages, Extent3d, util::DeviceExt};
+use wgpu::{util::DeviceExt, BufferUsages, Extent3d};
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -304,12 +304,14 @@ impl State {
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture().unwrap();
-        
-        let config_host = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::bytes_of(&self.config_data),
-            usage: wgpu::BufferUsages::COPY_SRC,
-        });
+
+        let config_host = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::bytes_of(&self.config_data),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(&config_host, 0, &self.config_buffer, 0, CONFIG_SIZE);
@@ -320,26 +322,25 @@ impl State {
         compute_pass.dispatch(self.size.width / 8, self.size.height / 4, 1);
         drop(compute_pass);
 
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
-            color_attachments: &[
-                wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-                        store: true,
-                    },
-                }
-            ],
+            color_attachments: &[wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                    store: true,
+                },
+            }],
             depth_stencil_attachment: None,
         });
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.copy_bind_group, &[]);
         render_pass.draw(0..3, 0..2);
         drop(render_pass);
-
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
@@ -367,7 +368,8 @@ impl State {
                 format: wgpu::TextureFormat::Rgba8Unorm,
                 usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
             });
-            self.compute_output_texture_view = self.compute_output_texture.create_view(&Default::default());
+            self.compute_output_texture_view =
+                self.compute_output_texture.create_view(&Default::default());
 
             self.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -379,7 +381,9 @@ impl State {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&self.compute_output_texture_view),
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.compute_output_texture_view,
+                        ),
                     },
                 ],
             });
@@ -389,7 +393,9 @@ impl State {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&self.compute_output_texture_view),
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.compute_output_texture_view,
+                        ),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -404,7 +410,5 @@ impl State {
         false
     }
 
-    fn update(&mut self) {
-        
-    }
+    fn update(&mut self) {}
 }
