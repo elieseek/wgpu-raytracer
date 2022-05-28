@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use cgmath::prelude::*;
-use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event::{DeviceEvent, ElementState, VirtualKeyCode};
 
 pub struct Camera {
     pub origin: cgmath::Point3<f32>,
@@ -68,43 +68,39 @@ pub struct CameraUniform {
 }
 
 pub struct CameraController {
-    move_speed: f32,
+    default_speed: f32,
     is_forward_pressed: bool,
     is_backward_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
+    is_up_pressed: bool,
+    is_down_pressed: bool,
     is_mouse_dragged: bool,
-    click_position: winit::dpi::PhysicalPosition<f32>,
-    mouse_position: winit::dpi::PhysicalPosition<f32>,
+    is_speed_boost: bool,
+    mouse_delta: cgmath::Vector2<f32>,
 }
 
 impl CameraController {
-    pub fn new(move_speed: f32) -> Self {
+    pub fn new(default_speed: f32) -> Self {
         Self {
-            move_speed,
+            default_speed,
             is_forward_pressed: false,
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
             is_mouse_dragged: false,
-            click_position: winit::dpi::PhysicalPosition::default(),
-            mouse_position: winit::dpi::PhysicalPosition::default(),
+            is_up_pressed: false,
+            is_down_pressed: false,
+            is_speed_boost: false,
+            mouse_delta: cgmath::vec2(0.0, 0.0),
         }
     }
 
-    pub fn process_events(&mut self, event: &WindowEvent) -> bool {
+    pub fn process_events(&mut self, event: &DeviceEvent) -> bool {
         match event {
-            WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        state,
-                        virtual_keycode: Some(keycode),
-                        ..
-                    },
-                ..
-            } => {
-                let is_pressed = *state == ElementState::Pressed;
-                match keycode {
+            DeviceEvent::Key(keyboard_input) => {
+                let is_pressed = keyboard_input.state == ElementState::Pressed;
+                match keyboard_input.virtual_keycode.unwrap() {
                     VirtualKeyCode::W | VirtualKeyCode::Up => {
                         self.is_forward_pressed = is_pressed;
                         true
@@ -121,30 +117,30 @@ impl CameraController {
                         self.is_right_pressed = is_pressed;
                         true
                     }
+                    VirtualKeyCode::Space => {
+                        self.is_up_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::LControl => {
+                        self.is_down_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::LShift => {
+                        self.is_speed_boost = is_pressed;
+                        true
+                    }
                     _ => false,
                 }
             }
-            WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_position = (*position).cast();
+            DeviceEvent::MouseMotion { delta } => {
+                self.mouse_delta = cgmath::vec2(delta.0 as f32, delta.1 as f32);
+                self.is_mouse_dragged = true;
                 true
             }
-
-            WindowEvent::MouseInput {
-                button: winit::event::MouseButton::Left,
-                state,
-                ..
-            } => match state {
-                winit::event::ElementState::Pressed => {
-                    self.click_position = self.mouse_position;
-                    self.is_mouse_dragged = true;
-                    true
-                }
-                winit::event::ElementState::Released => {
-                    self.is_mouse_dragged = false;
-                    true
-                }
-            },
-            _ => false,
+            _ => {
+                self.is_mouse_dragged = false;
+                false
+            }
         }
     }
 
@@ -155,33 +151,42 @@ impl CameraController {
 
         let right_norm = camera.horizontal.normalize();
 
+        let move_speed = if self.is_speed_boost {
+            2. * self.default_speed
+        } else {
+            self.default_speed
+        };
+
         // Project forward direction onto xz plane
-        if self.is_forward_pressed && forward_mag > self.move_speed {
-            camera.origin += forward_norm * self.move_speed;
-            camera.lower_left_corner += forward_norm * self.move_speed;
+        if self.is_forward_pressed && forward_mag > move_speed {
+            camera.origin += forward_norm * move_speed;
+            camera.lower_left_corner += forward_norm * move_speed;
         }
         if self.is_backward_pressed {
-            camera.origin -= forward_norm * self.move_speed;
-            camera.lower_left_corner -= forward_norm * self.move_speed;
+            camera.origin -= forward_norm * move_speed;
+            camera.lower_left_corner -= forward_norm * move_speed;
         }
         if self.is_right_pressed {
-            camera.origin += right_norm * self.move_speed;
-            camera.lower_left_corner += right_norm * self.move_speed;
+            camera.origin += right_norm * move_speed;
+            camera.lower_left_corner += right_norm * move_speed;
         }
         if self.is_left_pressed {
-            camera.origin -= right_norm * self.move_speed;
-            camera.lower_left_corner -= right_norm * self.move_speed;
+            camera.origin -= right_norm * move_speed;
+            camera.lower_left_corner -= right_norm * move_speed;
+        }
+        if self.is_up_pressed {
+            camera.origin -= camera.vertical * move_speed;
+            camera.lower_left_corner -= camera.vertical * move_speed;
+        }
+        if self.is_down_pressed {
+            camera.origin += camera.vertical * move_speed;
+            camera.lower_left_corner += camera.vertical * move_speed;
         }
 
         if self.is_mouse_dragged {
-            let mouse_move = cgmath::vec2(
-                self.mouse_position.x - self.click_position.x,
-                self.click_position.y - self.mouse_position.y,
-            );
-
-            let mouse_move_mag = mouse_move.magnitude();
-            if mouse_move_mag > 0.001 {
-                let mouse_move_norm = mouse_move.normalize();
+            let mouse_move_mag = self.mouse_delta.magnitude();
+            if mouse_move_mag > 0.0001 {
+                let mouse_move_norm = self.mouse_delta.normalize();
 
                 // Our mouse moves on a plane with coordinates x: camera.up, y: right_norm
                 let rotation_direction =
@@ -189,7 +194,7 @@ impl CameraController {
                 let rotation_axis = forward_norm.cross(rotation_direction).normalize();
                 let rotation = cgmath::Quaternion::from_axis_angle(
                     rotation_axis,
-                    cgmath::Rad(0.0001 * mouse_move_mag * std::f32::consts::FRAC_2_PI),
+                    cgmath::Rad(0.01 * mouse_move_mag * std::f32::consts::FRAC_2_PI),
                 );
                 camera.horizontal = rotation.rotate_vector(camera.horizontal);
                 camera.vertical = rotation.rotate_vector(camera.vertical);
@@ -199,6 +204,8 @@ impl CameraController {
                 camera.lower_left_corner = rotation
                     .rotate_point(camera.lower_left_corner - camera.origin.to_vec())
                     + camera.origin.to_vec();
+                self.mouse_delta = cgmath::Vector2::zero();
+                self.is_mouse_dragged = false;
             }
         }
     }

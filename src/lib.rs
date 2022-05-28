@@ -18,36 +18,57 @@ pub async fn run() {
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     window.set_title("Raytracer");
-    window.set_inner_size(winit::dpi::PhysicalSize::new(1600, 900));
+    window.set_inner_size(winit::dpi::PhysicalSize::new(1600_u32, 900_u32));
+    window.set_cursor_grab(true).unwrap();
+    window.set_cursor_visible(false);
 
     let mut state = State::new(&window).await;
 
+    let mut window_focused = true;
+
     event_loop.run(move |event, _, control_flow| match event {
+        Event::DeviceEvent {
+            device_id: _,
+            event,
+        } if window_focused => {
+            state.input(&event);
+        }
         Event::WindowEvent {
             window_id,
             ref event,
         } if window_id == window.id() => {
-            if !state.input(event) {
-                match event {
-                    WindowEvent::CloseRequested
-                    | WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: ElementState::Pressed,
-                                virtual_keycode: Some(VirtualKeyCode::Escape),
-                                ..
-                            },
-                        ..
-                    } => *control_flow = ControlFlow::Exit,
-                    WindowEvent::Resized(physical_size) => {
-                        state.resize(*physical_size);
-                    }
-                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                        // new_inner_size is &&mut so we have to dereference it twice
-                        state.resize(**new_inner_size);
-                    }
-                    _ => {}
+            match event {
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            state: ElementState::Pressed,
+                            virtual_keycode: Some(VirtualKeyCode::Escape),
+                            ..
+                        },
+                    ..
+                } => {
+                    window_focused = false;
+                    window.set_cursor_grab(false).unwrap();
+                    window.set_cursor_visible(true);
                 }
+                WindowEvent::MouseInput {
+                    state: winit::event::ElementState::Pressed,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                } => {
+                    window_focused = true;
+                    window.set_cursor_grab(true).unwrap();
+                    window.set_cursor_visible(false);
+                }
+                WindowEvent::Resized(physical_size) => {
+                    state.resize(*physical_size);
+                }
+                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                    // new_inner_size is &&mut so we have to dereference it twice
+                    state.resize(**new_inner_size);
+                }
+                _ => {}
             }
         }
         Event::RedrawRequested(window_id) if window_id == window.id() => {
@@ -144,7 +165,7 @@ impl State {
         );
 
         let camera_uniform = camera.get_uniform();
-        let camera_controller = camera::CameraController::new(0.1);
+        let camera_controller = camera::CameraController::new(0.05);
 
         let output_view = output.create_view(&Default::default());
 
@@ -216,7 +237,7 @@ impl State {
         }
     }
 
-    fn input(&mut self, event: &WindowEvent) -> bool {
+    fn input(&mut self, event: &DeviceEvent) -> bool {
         self.camera_controller.process_events(event)
     }
 
