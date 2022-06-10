@@ -2,7 +2,7 @@ use std::mem;
 
 use wgpu::{util::DeviceExt, BufferUsages};
 
-use crate::{camera::CameraUniform, Dimensions};
+use crate::{camera::CameraUniform, Dimensions, Scene};
 
 const CONFIG_SIZE: u64 = (mem::size_of::<u32>() + mem::size_of::<u32>()) as u64;
 
@@ -23,6 +23,7 @@ impl ComputePass {
         size: &winit::dpi::PhysicalSize<u32>,
         output_view: &wgpu::TextureView,
         camera_uniform: &CameraUniform,
+        scene: &Scene,
     ) -> Self {
         let config_data = Dimensions {
             width: size.width,
@@ -99,7 +100,12 @@ impl ComputePass {
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[&bind_group_layout, &camera_bind_group_layout],
+                bind_group_layouts: &[
+                    &bind_group_layout,
+                    &camera_bind_group_layout,
+                    &scene.sphere_bind_group_layout,
+                    &scene.material_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -142,6 +148,7 @@ impl ComputePass {
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         size: &winit::dpi::PhysicalSize<u32>,
+        scene: &Scene,
     ) -> Result<(), wgpu::SurfaceError> {
         let config_host = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
@@ -154,6 +161,9 @@ impl ComputePass {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
         compute_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+        compute_pass.set_bind_group(2, &scene.sphere_bind_group, &[]);
+        compute_pass.set_bind_group(3, &scene.material_bind_group, &[]);
+
         compute_pass.dispatch(size.width / 8, size.height / 4, 1);
         Ok(())
     }

@@ -24,7 +24,7 @@ impl Camera {
         let viewport_width = aspect_ratio * viewport_height;
 
         let w = (look_from - look_at).normalize();
-        let u = v_up.cross(w).normalize();
+        let u = w.cross(v_up).normalize();
         let v = w.cross(u);
 
         let origin = look_from;
@@ -175,44 +175,41 @@ impl CameraController {
             camera.lower_left_corner -= right_norm * move_speed;
         }
         if self.is_up_pressed {
-            camera.origin -= cgmath::Vector3::unit_y() * move_speed;
-            camera.lower_left_corner -= cgmath::Vector3::unit_y() * move_speed;
-        }
-        if self.is_down_pressed {
             camera.origin += cgmath::Vector3::unit_y() * move_speed;
             camera.lower_left_corner += cgmath::Vector3::unit_y() * move_speed;
         }
+        if self.is_down_pressed {
+            camera.origin -= cgmath::Vector3::unit_y() * move_speed;
+            camera.lower_left_corner -= cgmath::Vector3::unit_y() * move_speed;
+        }
 
         if self.is_mouse_dragged {
-            let mouse_move_mag = self.mouse_delta.magnitude();
-            if mouse_move_mag > 0.0001 {
-                // Our vertical rotation depends on camera.horizontal, so we apply horizontal
-                // rotations first.
-                let horizontal_rotation = cgmath::Quaternion::from_axis_angle(
-                    cgmath::Vector3::unit_y(),
-                    cgmath::Rad(-0.01 * self.mouse_delta.x * std::f32::consts::FRAC_2_PI),
-                );
-                camera.horizontal = horizontal_rotation.rotate_vector(camera.horizontal);
-                camera.vertical = horizontal_rotation.rotate_vector(camera.vertical);
-                // We need to rotate the lower left corner about the
-                // origin, so apply translations.
-                camera.lower_left_corner = horizontal_rotation
-                    .rotate_point(camera.lower_left_corner - camera.origin.to_vec())
-                    + camera.origin.to_vec();
+            // Our vertical rotation depends on camera.horizontal, so we apply horizontal
+            // rotations first.
+            let horizontal_rotation = cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_y(),
+                cgmath::Rad(0.01 * self.mouse_delta.x * std::f32::consts::FRAC_2_PI),
+            );
+            camera.horizontal = horizontal_rotation.rotate_vector(camera.horizontal);
+            camera.vertical = horizontal_rotation.rotate_vector(camera.vertical);
+            // We need to rotate the lower left corner about the
+            // origin, so apply translations.
+            camera.lower_left_corner = horizontal_rotation
+                .rotate_point(camera.lower_left_corner - camera.origin.to_vec())
+                + camera.origin.to_vec();
 
-                let vertical_rotation = cgmath::Quaternion::from_axis_angle(
-                    camera.horizontal.normalize(),
-                    cgmath::Rad(0.01 * self.mouse_delta.y * std::f32::consts::FRAC_2_PI),
-                );
-                camera.vertical = vertical_rotation.rotate_vector(camera.vertical);
+            let vertical_rotation = cgmath::Quaternion::from_axis_angle(
+                camera.horizontal.normalize(),
+                cgmath::Rad(0.01 * self.mouse_delta.y * std::f32::consts::FRAC_2_PI),
+            );
+            camera.vertical = vertical_rotation.rotate_vector(camera.vertical);
 
-                camera.lower_left_corner = vertical_rotation
-                    .rotate_point(camera.lower_left_corner - camera.origin.to_vec())
-                    + camera.origin.to_vec();
+            camera.lower_left_corner = vertical_rotation
+                .rotate_point(camera.lower_left_corner - camera.origin.to_vec())
+                + camera.origin.to_vec();
 
-                self.mouse_delta = cgmath::Vector2::zero();
-                self.is_mouse_dragged = false;
-            }
+            self.mouse_delta = cgmath::Vector2::zero();
+            self.is_mouse_dragged = false;
         }
     }
 }

@@ -1,4 +1,4 @@
-use wgpu::Extent3d;
+use wgpu::{util::DeviceExt, Extent3d};
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -10,6 +10,8 @@ use render_pass::RenderPass;
 
 mod camera;
 mod compute_pass;
+mod instance;
+mod material;
 mod render_pass;
 
 pub async fn run() {
@@ -103,6 +105,7 @@ struct State {
     camera: camera::Camera,
     camera_uniform: camera::CameraUniform,
     camera_controller: camera::CameraController,
+    scene: Scene,
     compute_pass: ComputePass,
     render_pass: RenderPass,
 }
@@ -156,9 +159,11 @@ impl State {
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         });
 
+        let output_view = output.create_view(&Default::default());
+
         let camera = camera::Camera::new(
             (0.0, 0.0, 0.0).into(),
-            (0.0, 0.0, -1.0).into(),
+            (0.0, 0.0, 1.0).into(),
             cgmath::Vector3::unit_y(),
             70.0,
             16.0 / 9.0,
@@ -167,9 +172,92 @@ impl State {
         let camera_uniform = camera.get_uniform();
         let camera_controller = camera::CameraController::new(0.05);
 
-        let output_view = output.create_view(&Default::default());
+        let red = material::Lambertian::new([1.0, 0.0, 0.0]);
+        let blue = material::Lambertian::new([0.0, 0.0, 1.0]);
+        let purple = material::Lambertian::new([0.8, 0.0, 0.8]);
 
-        let compute_pass = ComputePass::new(&device, &size, &output_view, &camera_uniform);
+        let lambertian_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("lambertian_buffer"),
+            contents: bytemuck::cast_slice(&[red, blue, purple]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let sphere1 = instance::Sphere::new(0, 1.0, cgmath::vec3(10.0, 0.0, 0.0), cgmath::Deg(0.0));
+        let sphere2 = instance::Sphere::new(1, 2.0, cgmath::vec3(0.0, 10.0, 0.0), cgmath::Deg(0.0));
+        let sphere3 = instance::Sphere::new(2, 3.0, cgmath::vec3(0.0, 0.0, 10.0), cgmath::Deg(0.0));
+        let sphere4 =
+            instance::Sphere::new(2, 3.0, cgmath::vec3(0.0, 15.0, 10.0), cgmath::Deg(0.0));
+        let sphere5 =
+            instance::Sphere::new(0, 3.0, cgmath::vec3(0.0, 15.0, 10.0), cgmath::Deg(0.0));
+        let sphere6 =
+            instance::Sphere::new(2, 3.0, cgmath::vec3(20.0, 0.0, 10.0), cgmath::Deg(0.0));
+        let sphere7 =
+            instance::Sphere::new(1, 20.0, cgmath::vec3(0.0, 50.0, 10.0), cgmath::Deg(0.0));
+
+        let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("sphere_buffer"),
+            contents: bytemuck::cast_slice(&[
+                sphere1, sphere2, sphere3, sphere4, sphere5, sphere6, sphere7,
+            ]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let sphere_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("sphere_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let sphere_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sphere_bind_group"),
+            layout: &sphere_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: sphere_buffer.as_entire_binding(),
+            }],
+        });
+
+        let material_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("material_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let material_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("material_bind_group"),
+            layout: &material_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: lambertian_buffer.as_entire_binding(),
+            }],
+        });
+
+        let scene = Scene {
+            sphere_bind_group_layout,
+            sphere_bind_group,
+            material_bind_group_layout,
+            material_bind_group,
+        };
+
+        let compute_pass = ComputePass::new(&device, &size, &output_view, &camera_uniform, &scene);
         let render_pass = RenderPass::new(&device, format, &output_view);
 
         Self {
@@ -183,6 +271,7 @@ impl State {
             camera,
             camera_uniform,
             camera_controller,
+            scene,
             compute_pass,
             render_pass,
         }
@@ -194,7 +283,7 @@ impl State {
         let mut encoder = self.device.create_command_encoder(&Default::default());
 
         self.compute_pass
-            .render(&self.device, &mut encoder, &self.size)
+            .render(&self.device, &mut encoder, &self.size, &self.scene)
             .unwrap();
 
         let view = frame
@@ -253,4 +342,11 @@ impl State {
 pub struct Dimensions {
     width: u32,
     height: u32,
+}
+
+pub struct Scene {
+    sphere_bind_group_layout: wgpu::BindGroupLayout,
+    sphere_bind_group: wgpu::BindGroup,
+    material_bind_group_layout: wgpu::BindGroupLayout,
+    material_bind_group: wgpu::BindGroup,
 }
