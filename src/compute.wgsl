@@ -33,22 +33,11 @@ struct Sphere {
     radius: f32;
     position: vec3<f32>;
 };
-
 let unit_ball = Sphere(1.0, vec3<f32>(0.0, 0.0, 0.0));
 
-fn hit_sphere(center: vec3<f32>, radius: f32, r: Ray) -> f32 {
-    let oc: vec3<f32> = r.origin - center;
-    let a: f32 = dot(r.direction, r.direction);
-    let half_b: f32 = dot(oc, r.direction);
-    let c: f32 = dot(oc, oc) - radius*radius;
-    let discriminant: f32 = half_b * half_b - a*c;
-
-    var result: f32 = -1.0;
-    if (discriminant > 0.) {
-        result = (-half_b - sqrt(discriminant)) / a;
-    };
-
-    return result;
+struct Hit {
+    distance: f32;
+    color: vec3<f32>;
 };
 
 [[group(0), binding(0)]] var<uniform> params: Params;
@@ -69,31 +58,63 @@ fn get_ray(u: f32, v: f32) -> Ray {
     return ray;
 }
 
+fn hit_sphere(r: Ray, sphere: SphereInstance) -> Hit {
+    let transform_mat = sphere.transform;
+    let color = lambertians.contents[sphere.material_id];
+    let center = (transform_mat * vec4<f32>(unit_ball.position, 1.0)).xyz;
+    let radius = sphere.scale;
+    let oc: vec3<f32> = r.origin - center;
+    let a: f32 = dot(r.direction, r.direction);
+    let half_b: f32 = dot(oc, r.direction);
+    let c: f32 = dot(oc, oc) - radius*radius;
+    let discriminant: f32 = half_b * half_b - a*c;
+
+    var hit: Hit;
+    hit.distance = -1.0;
+    hit.color = vec3<f32>(0., 0., 0.);
+    if (discriminant > 0.) {
+        hit.distance = (-half_b - sqrt(discriminant)) / a;
+        hit.color = color;
+    };
+
+    return hit;
+};
+
+fn closest_sphere_hit(r: Ray) -> Hit {
+    var transform_mat: mat4x4<f32>;
+    var n: vec3<f32>;
+    var sphere: SphereInstance;
+    var color: vec3<f32>;
+    var num_instances: i32 = bitcast<i32>(arrayLength(&sphere_instances.contents));
+    var current_hit: Hit;
+    var best_hit: Hit;
+    best_hit.distance = -10000000.0;
+    best_hit.color = 0.5 * vec3<f32>(1.0, 1.0, 1.0);
+    for (var i: i32 = 0; i < num_instances; i=i+1) {
+        sphere = sphere_instances.contents[i];
+       
+        current_hit = hit_sphere(r, sphere);
+        if (current_hit.distance > 0.0 && abs(current_hit.distance) < abs(best_hit.distance)) {
+            best_hit = current_hit;
+        }; 
+    }
+
+    return best_hit;
+}
 
 [[stage(compute), workgroup_size(8, 4, 1)]]
 fn cs_main(
     [[builtin(global_invocation_id)]] global_id: vec3<u32>, 
     [[builtin(local_invocation_id)]] local_id: vec3<u32>
 ) {
-    var pixel_color = 0.5*vec4<f32>(1.0, 1.0, 1.0, 1.0);
     let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
     let r = get_ray(pixel_coords.x, pixel_coords.y);
-    var transform_mat: mat4x4<f32>;
-    var n: vec3<f32>;
-    var sphere: SphereInstance;
-    var color: vec3<f32>;
-    var num_instances: i32 = bitcast<i32>(arrayLength(&sphere_instances.contents));
-    for (var i: i32 = 0; i < num_instances; i=i+1) {
-        sphere = sphere_instances.contents[i];
-        transform_mat = sphere.transform;
-        color = lambertians.contents[sphere.material_id];
-        var sphere = Sphere( sphere.scale * unit_ball.radius, (transform_mat * vec4<f32>(unit_ball.position, 1.0)).xyz);
-        var t = hit_sphere(sphere.position, sphere.radius, r);
-        if (t > 0.0) {
-            n = normalize(r.origin + t * r.direction - vec3<f32>(0.0, 0.0, -1.0));
-            pixel_color = vec4<f32>(color, 1.0);
-        }; 
-    }
+    
+    var best_hit: Hit;
+
+    best_hit = closest_sphere_hit(r);
+
+    let pixel_color = vec4<f32>(best_hit.color, 1.0);
 
     textureStore(output_tex, vec2<i32>(global_id.xy), pixel_color);
 }
