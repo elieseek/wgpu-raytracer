@@ -1,6 +1,7 @@
 struct Params {
     width: u32;
     height: u32;
+    seed: u32;
 };
 
 struct Camera {
@@ -102,13 +103,17 @@ fn closest_sphere_hit(r: Ray) -> Hit {
     return best_hit;
 }
 
+fn rand(input: f32) -> f32 {
+    return fract(sin( f32(params.seed) / 10000000000.0 + dot(vec2<f32>(input, input), vec2<f32>(12.9898,78.233))) * 43758.5453);
+}
+
 [[stage(compute), workgroup_size(8, 4, 1)]]
 fn cs_main(
     [[builtin(global_invocation_id)]] global_id: vec3<u32>, 
     [[builtin(local_invocation_id)]] local_id: vec3<u32>
 ) {
     let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
-    let r = get_ray(pixel_coords.x, pixel_coords.y);
+    let r = get_ray(pixel_coords.x + rand(pixel_coords.x) / f32(params.width), pixel_coords.y + rand(pixel_coords.y) / f32(params.height));
     
     var best_hit: Hit;
 

@@ -1,14 +1,16 @@
 use std::mem;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use wgpu::{util::DeviceExt, BufferUsages};
 
-use crate::{camera::CameraUniform, Dimensions, Scene};
+use crate::{camera::CameraUniform, ConfigData, Scene};
 
-const CONFIG_SIZE: u64 = (mem::size_of::<u32>() + mem::size_of::<u32>()) as u64;
+const CONFIG_SIZE: u64 =
+    (mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>()) as u64;
 
 pub struct ComputePass {
     pub config_buffer: wgpu::Buffer,
-    pub config_data: Dimensions,
+    pub config_data: ConfigData,
     pub pipeline: wgpu::ComputePipeline,
     pub bind_group: wgpu::BindGroup,
     pub bind_group_layout: wgpu::BindGroupLayout,
@@ -25,9 +27,14 @@ impl ComputePass {
         camera_uniform: &CameraUniform,
         scene: &Scene,
     ) -> Self {
-        let config_data = Dimensions {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u32;
+        let config_data = ConfigData {
             width: size.width,
             height: size.height,
+            seed,
         };
         let config_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Config Buffer"),
@@ -150,6 +157,10 @@ impl ComputePass {
         size: &winit::dpi::PhysicalSize<u32>,
         scene: &Scene,
     ) -> Result<(), wgpu::SurfaceError> {
+        self.config_data.seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u32;
         let config_host = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: bytemuck::bytes_of(&self.config_data),
@@ -174,9 +185,13 @@ impl ComputePass {
         new_size: &winit::dpi::PhysicalSize<u32>,
         output_view: &wgpu::TextureView,
     ) {
-        self.config_data = Dimensions {
+        self.config_data = ConfigData {
             width: new_size.width,
             height: new_size.height,
+            seed: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as u32,
         };
         self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
