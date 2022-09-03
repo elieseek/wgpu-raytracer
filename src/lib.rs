@@ -203,14 +203,13 @@ impl State {
         });
 
         let sphere1 = instance::Sphere::new(0, 1.0, cgmath::vec3(0.0, 1.0, -1.0), cgmath::Deg(0.0));
-        let sphere2 = instance::Sphere::new(1, 1000.0, cgmath::vec3(0.0, -1000.0, 0.0), cgmath::Deg(0.0));
+        let sphere2 =
+            instance::Sphere::new(1, 1000.0, cgmath::vec3(0.0, -1000.0, 0.0), cgmath::Deg(0.0));
         let sphere3 = instance::Sphere::new(2, 1.0, cgmath::vec3(0.0, 1.0, 1.0), cgmath::Deg(0.0));
 
         let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("sphere_buffer"),
-            contents: bytemuck::cast_slice(&[
-                sphere1, sphere2, sphere3,
-            ]),
+            contents: bytemuck::cast_slice(&[sphere1, sphere2, sphere3]),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 

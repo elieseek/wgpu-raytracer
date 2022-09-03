@@ -1,6 +1,7 @@
 use std::mem;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rand;
 use wgpu::{util::DeviceExt, BufferUsages};
 
 use crate::{camera::CameraUniform, ConfigData, Scene};
@@ -27,10 +28,7 @@ impl ComputePass {
         camera_uniform: &CameraUniform,
         scene: &Scene,
     ) -> Self {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u32;
+        let seed = rand::random();
         let config_data = ConfigData {
             width: size.width,
             height: size.height,
@@ -39,7 +37,7 @@ impl ComputePass {
         let config_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Config Buffer"),
             size: CONFIG_SIZE,
-            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE | BufferUsages::UNIFORM,
+            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
             mapped_at_creation: false,
         });
 
@@ -157,10 +155,7 @@ impl ComputePass {
         size: &winit::dpi::PhysicalSize<u32>,
         scene: &Scene,
     ) -> Result<(), wgpu::SurfaceError> {
-        self.config_data.seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u32;
+        self.config_data.seed = rand::random();
         let config_host = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: bytemuck::bytes_of(&self.config_data),
