@@ -89,8 +89,9 @@ fn closest_sphere_hit(r: Ray) -> Hit {
     var num_instances: i32 = bitcast<i32>(arrayLength(&sphere_instances.contents));
     var current_hit: Hit;
     var best_hit: Hit;
+    let t = 0.5 * (r.direction.y + 1.0);
     best_hit.distance = -10000000.0;
-    best_hit.color = 0.5 * vec3<f32>(1.0, 1.0, 1.0);
+    best_hit.color = (1.0 - t) * vec3<f32>(1.0, 1.0, 1.0) + t * vec3<f32>(0.5, 0.7, 1.0);
     for (var i: i32 = 0; i < num_instances; i=i+1) {
         sphere = sphere_instances.contents[i];
        
@@ -103,8 +104,8 @@ fn closest_sphere_hit(r: Ray) -> Hit {
     return best_hit;
 }
 
-fn rand(input: f32) -> f32 {
-    return fract(sin( f32(params.seed) / 10000000000.0 + dot(vec2<f32>(input, input), vec2<f32>(12.9898,78.233))) * 43758.5453);
+fn rand(input: vec2<f32>, seed_modifier: f32) -> f32 {
+    return fract(sin( seed_modifier * f32(params.seed) / 10000000000.0 + dot(input, vec2<f32>(12.9898,78.233))) * 43758.5453);
 }
 
 [[stage(compute), workgroup_size(8, 4, 1)]]
@@ -113,7 +114,9 @@ fn cs_main(
     [[builtin(local_invocation_id)]] local_id: vec3<u32>
 ) {
     let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
-    let r = get_ray(pixel_coords.x + rand(pixel_coords.x) / f32(params.width), pixel_coords.y + rand(pixel_coords.y) / f32(params.height));
+    let rand_x = rand(pixel_coords, 1.0);
+    let rand_y = rand(pixel_coords, rand_x);
+    let r = get_ray(pixel_coords.x + rand_x / f32(params.width), pixel_coords.y + rand_y / f32(params.height));
     
     var best_hit: Hit;
 
