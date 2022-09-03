@@ -192,32 +192,24 @@ impl State {
         let camera_uniform = camera.get_uniform();
         let camera_controller = camera::CameraController::new(0.05);
 
-        let red = material::Lambertian::new([1.0, 0.0, 0.0]);
-        let blue = material::Lambertian::new([0.0, 0.0, 1.0]);
+        let grey = material::Lambertian::new([0.8, 0.8, 0.8]);
+        let green = material::Lambertian::new([0.2, 0.85, 0.2]);
         let purple = material::Lambertian::new([0.8, 0.0, 0.8]);
 
         let lambertian_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("lambertian_buffer"),
-            contents: bytemuck::cast_slice(&[red, blue, purple]),
+            contents: bytemuck::cast_slice(&[grey, green, purple]),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let sphere1 = instance::Sphere::new(0, 1.0, cgmath::vec3(10.0, 0.0, 0.0), cgmath::Deg(0.0));
-        let sphere2 = instance::Sphere::new(1, 2.0, cgmath::vec3(0.0, 10.0, 0.0), cgmath::Deg(0.0));
-        let sphere3 = instance::Sphere::new(2, 3.0, cgmath::vec3(0.0, 0.0, 10.0), cgmath::Deg(0.0));
-        let sphere4 =
-            instance::Sphere::new(2, 3.0, cgmath::vec3(0.0, 15.0, 10.0), cgmath::Deg(0.0));
-        let sphere5 =
-            instance::Sphere::new(0, 3.0, cgmath::vec3(0.0, 15.0, 10.0), cgmath::Deg(0.0));
-        let sphere6 =
-            instance::Sphere::new(2, 3.0, cgmath::vec3(20.0, 0.0, 10.0), cgmath::Deg(0.0));
-        let sphere7 =
-            instance::Sphere::new(1, 20.0, cgmath::vec3(0.0, 50.0, 10.0), cgmath::Deg(0.0));
+        let sphere1 = instance::Sphere::new(0, 1.0, cgmath::vec3(0.0, 1.0, -1.0), cgmath::Deg(0.0));
+        let sphere2 = instance::Sphere::new(1, 1000.0, cgmath::vec3(0.0, -1000.0, 0.0), cgmath::Deg(0.0));
+        let sphere3 = instance::Sphere::new(2, 1.0, cgmath::vec3(0.0, 1.0, 1.0), cgmath::Deg(0.0));
 
         let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("sphere_buffer"),
             contents: bytemuck::cast_slice(&[
-                sphere1, sphere2, sphere3, sphere4, sphere5, sphere6, sphere7,
+                sphere1, sphere2, sphere3,
             ]),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });

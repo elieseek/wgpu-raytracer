@@ -39,6 +39,8 @@ let unit_ball = Sphere(1.0, vec3<f32>(0.0, 0.0, 0.0));
 struct Hit {
     distance: f32;
     color: vec3<f32>;
+    location: vec3<f32>;
+    normal: vec3<f32>;
 };
 
 [[group(0), binding(0)]] var<uniform> params: Params;
@@ -74,8 +76,12 @@ fn hit_sphere(r: Ray, sphere: SphereInstance) -> Hit {
     hit.distance = -1.0;
     hit.color = vec3<f32>(0., 0., 0.);
     if (discriminant > 0.) {
-        hit.distance = (-half_b - sqrt(discriminant)) / a;
+        let hit_distance = (-half_b - sqrt(discriminant)) / a;
+        let hit_location = r.origin + r.direction * hit_distance - 1e-6;
+        hit.distance = hit_distance;
         hit.color = color;
+        hit.location = hit_location;
+        hit.normal = normalize(hit_location - center);
     };
 
     return hit;
@@ -105,8 +111,36 @@ fn closest_sphere_hit(r: Ray) -> Hit {
 }
 
 fn rand(input: vec2<f32>, seed_modifier: f32) -> f32 {
-    return fract(sin( seed_modifier * f32(params.seed) / 10000000000.0 + dot(input, vec2<f32>(12.9898,78.233))) * 43758.5453);
+    return fract(sin( seed_modifier * f32(params.seed) / 1000.0 + dot(input, vec2<f32>(12.9898,78.233))) * 43758.5453);
 }
+
+
+fn rand_unit_vec(input: vec2<f32>, seed_modifier: f32) -> vec3<f32> {
+    let pi = 3.1415926535;
+    let theta = 2.0 * pi * rand(input, seed_modifier);
+    let phi = acos(1.0 - 2.0 * rand(input, theta));
+    let x = sin(phi) * cos(theta);
+    let y = sin(phi) * sin(theta);
+    let z = cos(phi);
+    return vec3<f32>(x, y, z);
+}
+
+fn recursive_trace(r: Ray) -> vec3<f32> {
+    let max_depth: i32 = 50;
+    var albedo: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
+    var cur_ray: Ray = r;
+    for (var i: i32 = 0; i < max_depth; i=i+1) {
+        let best_hit = closest_sphere_hit(cur_ray);
+
+        albedo = albedo * best_hit.color;
+        if (best_hit.distance < 0.0) {
+            break
+        }
+        let new_direction = best_hit.normal + rand_unit_vec(best_hit.location.xy, 60.0*f32(i));
+        cur_ray = Ray(best_hit.location, new_direction);
+    }
+    return albedo;
+};
 
 [[stage(compute), workgroup_size(8, 4, 1)]]
 fn cs_main(
@@ -117,12 +151,8 @@ fn cs_main(
     let rand_x = rand(pixel_coords, 1.0);
     let rand_y = rand(pixel_coords, rand_x);
     let r = get_ray(pixel_coords.x + rand_x / f32(params.width), pixel_coords.y + rand_y / f32(params.height));
-    
-    var best_hit: Hit;
 
-    best_hit = closest_sphere_hit(r);
-
-    let pixel_color = vec4<f32>(best_hit.color, 1.0);
+    let pixel_color = vec4<f32>(recursive_trace(r), 1.0);
 
     textureStore(output_tex, vec2<i32>(global_id.xy), pixel_color);
 }
