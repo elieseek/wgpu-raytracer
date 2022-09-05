@@ -94,7 +94,7 @@ fn hit_sphere(r: Ray, sphere: SphereInstance) -> Hit {
     hit.color = vec3<f32>(0., 0., 0.);
     if (discriminant > 0.) {
         let hit_distance = (-half_b - sqrt(discriminant)) / a;
-        let hit_location = r.origin + r.direction * hit_distance * 0.99 ;
+        let hit_location = r.origin + r.direction * hit_distance * 0.999 ;
         hit.distance = hit_distance;
         hit.color = color;
         hit.location = hit_location;
@@ -184,7 +184,7 @@ fn cs_main(
     [[builtin(local_invocation_id)]] local_id: vec3<u32>
 ) {
     let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
-    var rng = params.seed + 10000u * global_id.x + global_id.y;
+    var rng = params.seed + 1203793u * global_id.x + 7u * global_id.y;
     let rand = rand_2f(rng);
     let rand_xy = rand.res;
     rng = rand.rng;
@@ -192,5 +192,5 @@ fn cs_main(
 
     let pixel_color = vec4<f32>(recursive_trace(r, rng), 1.0);
 
-    textureStore(output_tex, vec2<i32>(global_id.xy), vec4<f32>(rand_xy.xxx, 1.0) );
+    textureStore(output_tex, vec2<i32>(global_id.xy), pixel_color);
 }
