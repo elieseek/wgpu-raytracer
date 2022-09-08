@@ -3,6 +3,8 @@ use std::f32::consts::PI;
 use cgmath::prelude::*;
 use winit::event::{DeviceEvent, ElementState, VirtualKeyCode};
 
+const MOUSE_SCALING: f32 = 0.0000017;
+
 pub struct Camera {
     pub origin: cgmath::Point3<f32>,
     pub horizontal: cgmath::Vector3<f32>,
@@ -144,7 +146,7 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&mut self, camera: &mut Camera) {
+    pub fn update_camera(&mut self, camera: &mut Camera, duration: u128) {
         let forward = camera.vertical.cross(camera.horizontal);
         let forward_norm = forward.normalize();
         let forward_mag = forward.magnitude();
@@ -152,9 +154,9 @@ impl CameraController {
         let right_norm = camera.horizontal.normalize();
 
         let move_speed = if self.is_speed_boost {
-            2. * self.default_speed
+            2. * self.default_speed * duration as f32
         } else {
-            self.default_speed
+            self.default_speed * duration as f32
         };
 
         // Project forward direction onto xz plane
@@ -188,7 +190,11 @@ impl CameraController {
             // rotations first.
             let horizontal_rotation = cgmath::Quaternion::from_axis_angle(
                 cgmath::Vector3::unit_y(),
-                cgmath::Rad(0.01 * self.mouse_delta.x * std::f32::consts::FRAC_2_PI),
+                cgmath::Rad(
+                    (MOUSE_SCALING * duration as f32)
+                        * self.mouse_delta.x
+                        * std::f32::consts::FRAC_2_PI,
+                ),
             );
             camera.horizontal = horizontal_rotation.rotate_vector(camera.horizontal);
             camera.vertical = horizontal_rotation.rotate_vector(camera.vertical);
@@ -200,7 +206,11 @@ impl CameraController {
 
             let vertical_rotation = cgmath::Quaternion::from_axis_angle(
                 camera.horizontal.normalize(),
-                cgmath::Rad(0.01 * self.mouse_delta.y * std::f32::consts::FRAC_2_PI),
+                cgmath::Rad(
+                    (MOUSE_SCALING * duration as f32)
+                        * self.mouse_delta.y
+                        * std::f32::consts::FRAC_2_PI,
+                ),
             );
             camera.vertical = vertical_rotation.rotate_vector(camera.vertical);
 

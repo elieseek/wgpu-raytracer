@@ -1,3 +1,4 @@
+use std::time::Instant;
 use wgpu::{util::DeviceExt, Extent3d};
 use winit::{
     event::*,
@@ -27,6 +28,7 @@ pub async fn run() {
     let mut state = State::new(&window).await;
 
     let mut window_focused = true;
+    let mut now = Instant::now();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::DeviceEvent {
@@ -74,7 +76,8 @@ pub async fn run() {
             }
         }
         Event::RedrawRequested(window_id) if window_id == window.id() => {
-            state.update();
+            state.update(now.elapsed().as_micros());
+            now = Instant::now();
             match state.render() {
                 Ok(_) => {}
                 // Reconfigure the surface if lost
@@ -185,7 +188,7 @@ impl State {
         );
 
         let camera_uniform = camera.get_uniform();
-        let camera_controller = camera::CameraController::new(0.05);
+        let camera_controller = camera::CameraController::new(5e-6);
 
         let grey = material::Lambertian::new([0.8, 0.8, 0.8]);
         let green = material::Lambertian::new([0.2, 0.85, 0.2]);
@@ -358,8 +361,9 @@ impl State {
         result
     }
 
-    fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
+    fn update(&mut self, duration: u128) {
+        self.camera_controller
+            .update_camera(&mut self.camera, duration);
         self.camera_uniform = self.camera.get_uniform();
         self.compute_pass.update(&self.queue, self.camera_uniform);
     }
