@@ -354,18 +354,18 @@ impl State {
     }
 
     fn input(&mut self, event: &DeviceEvent) -> bool {
-        let result = self.camera_controller.process_events(event);
-        if result {
-            self.compute_pass.reset_texture();
-        }
-        result
+        self.camera_controller.process_events(event)
     }
 
     fn update(&mut self, duration: u128) {
-        self.camera_controller
+        let was_updated = self
+            .camera_controller
             .update_camera(&mut self.camera, duration);
-        self.camera_uniform = self.camera.get_uniform();
-        self.compute_pass.update(&self.queue, self.camera_uniform);
+        if was_updated {
+            self.compute_pass.reset_texture();
+            self.camera_uniform = self.camera.get_uniform();
+            self.compute_pass.update(&self.queue, self.camera_uniform);
+        }
     }
 }
 

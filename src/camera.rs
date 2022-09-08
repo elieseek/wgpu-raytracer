@@ -146,7 +146,15 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&mut self, camera: &mut Camera, duration: u128) {
+    pub fn update_camera(&mut self, camera: &mut Camera, duration: u128) -> bool {
+        let was_camera_changed = self.is_left_pressed
+            | self.is_right_pressed
+            | self.is_forward_pressed
+            | self.is_backward_pressed
+            | self.is_up_pressed
+            | self.is_down_pressed
+            | self.is_mouse_dragged;
+
         let forward = camera.vertical.cross(camera.horizontal);
         let forward_norm = forward.normalize();
         let forward_mag = forward.magnitude();
@@ -221,5 +229,8 @@ impl CameraController {
             self.mouse_delta = cgmath::Vector2::zero();
             self.is_mouse_dragged = false;
         }
+
+        // Return true if camera was changed
+        was_camera_changed
     }
 }
