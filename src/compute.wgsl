@@ -2,6 +2,7 @@ struct Params {
     width: u32;
     height: u32;
     seed: u32;
+    clear_flag: u32;
 };
 
 struct RandRes1u {
@@ -61,7 +62,7 @@ struct Hit {
 };
 
 [[group(0), binding(0)]] var<uniform> params: Params;
-[[group(0), binding(1)]] var output_tex: texture_storage_2d<rgba8unorm, write>;
+[[group(0), binding(1)]] var output_tex: texture_storage_2d<rgba32float, read_write>;
 
 [[group(1), binding(0)]] var<uniform> camera: Camera;
 
@@ -190,7 +191,13 @@ fn cs_main(
     rng = rand.rng;
     let r = get_ray(pixel_coords.x + rand_xy.x / f32(params.width), pixel_coords.y + rand_xy.y / f32(params.height));
 
-    let pixel_color = vec4<f32>(recursive_trace(r, rng), 1.0);
+    var pixel_color = vec4<f32>(recursive_trace(r, rng), 1.0);
+
+    let prev = textureLoad(output_tex, vec2<i32>(global_id.xy));
+
+    if (params.clear_flag == 0u) {
+        pixel_color = pixel_color + prev;
+    }
 
     textureStore(output_tex, vec2<i32>(global_id.xy), pixel_color);
 }

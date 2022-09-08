@@ -100,10 +100,9 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
+    empty_texture: wgpu::Texture,
     compute_texture: wgpu::Texture,
     compute_view: wgpu::TextureView,
-    output_texture: wgpu::Texture,
-    output_view: wgpu::TextureView,
     camera: camera::Camera,
     camera_uniform: camera::CameraUniform,
     camera_controller: camera::CameraController,
@@ -130,7 +129,7 @@ impl State {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    features: wgpu::Features::empty(),
+                    features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                     limits: wgpu::Limits::default(),
                 },
                 None,
@@ -157,14 +156,12 @@ impl State {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: wgpu::TextureFormat::Rgba32Float,
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         });
 
-        let compute_view = compute_texture.create_view(&Default::default());
-
-        let output_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("output_texture"),
+        let empty_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("compute_texture"),
             size: Extent3d {
                 width: size.width,
                 height: size.height,
@@ -173,13 +170,11 @@ impl State {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         });
 
-        let output_view = output_texture.create_view(&Default::default());
+        let compute_view = compute_texture.create_view(&Default::default());
 
         let camera = camera::Camera::new(
             (0.0, 0.0, 0.0).into(),
@@ -277,10 +272,9 @@ impl State {
             queue,
             config,
             size,
+            empty_texture,
             compute_texture,
             compute_view,
-            output_texture,
-            output_view,
             camera,
             camera_uniform,
             camera_controller,
@@ -298,28 +292,10 @@ impl State {
         self.compute_pass
             .render(&self.device, &mut encoder, &self.size, &self.scene)?;
 
-        self.render_pass.render(&mut encoder, &self.output_view)?;
-        self.render_pass.update(&self.queue);
-
-        encoder.copy_texture_to_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.output_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::ImageCopyTexture {
-                texture: &frame.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::Extent3d {
-                height: self.config.height,
-                width: self.config.width,
-                depth_or_array_layers: 1,
-            },
-        );
+        self.render_pass.render(
+            &mut encoder,
+            &frame.texture.create_view(&Default::default()),
+        )?;
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
@@ -344,13 +320,14 @@ impl State {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                format: wgpu::TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
             });
-            self.compute_view = self.compute_texture.create_view(&Default::default());
 
-            self.output_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("output_texture"),
+            self.empty_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("compute_texture"),
                 size: Extent3d {
                     width: new_size.width,
                     height: new_size.height,
@@ -359,31 +336,32 @@ impl State {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                format: wgpu::TextureFormat::Rgba32Float,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
+                    | wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
             });
-            self.output_view = self.output_texture.create_view(&Default::default());
+
+            self.compute_view = self.compute_texture.create_view(&Default::default());
 
             self.compute_pass
                 .resize(&self.device, &new_size, &self.compute_view);
             self.render_pass.resize(&self.device, &self.compute_view);
-            self.render_pass.reset_sample();
-            self.render_pass.update(&self.queue);
         }
     }
 
     fn input(&mut self, event: &DeviceEvent) -> bool {
-        self.render_pass.reset_sample();
-        self.camera_controller.process_events(event)
+        let result = self.camera_controller.process_events(event);
+        if result {
+            self.compute_pass.reset_texture();
+        }
+        result
     }
 
     fn update(&mut self) {
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform = self.camera.get_uniform();
         self.compute_pass.update(&self.queue, self.camera_uniform);
-        self.render_pass.update(&self.queue);
     }
 }
 
@@ -393,6 +371,7 @@ pub struct ConfigData {
     width: u32,
     height: u32,
     seed: u32,
+    clear_flag: u32,
 }
 
 pub struct Scene {
