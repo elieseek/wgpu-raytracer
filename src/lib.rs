@@ -103,7 +103,6 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    empty_texture: wgpu::Texture,
     compute_texture: wgpu::Texture,
     compute_view: wgpu::TextureView,
     camera: camera::Camera,
@@ -150,20 +149,6 @@ impl State {
         surface.configure(&device, &config);
 
         let compute_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("compute_texture"),
-            size: Extent3d {
-                width: size.width,
-                height: size.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-        });
-
-        let empty_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("compute_texture"),
             size: Extent3d {
                 width: size.width,
@@ -275,7 +260,6 @@ impl State {
             queue,
             config,
             size,
-            empty_texture,
             compute_texture,
             compute_view,
             camera,
@@ -314,22 +298,6 @@ impl State {
 
             // We need to recreate the comput and output texture on resize
             self.compute_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("compute_texture"),
-                size: Extent3d {
-                    width: new_size.width,
-                    height: new_size.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-            });
-
-            self.empty_texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("compute_texture"),
                 size: Extent3d {
                     width: new_size.width,
