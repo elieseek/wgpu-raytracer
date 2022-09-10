@@ -6,14 +6,14 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use compute_pass::ComputePass;
-use render_pass::RenderPass;
+use blit::RenderPass;
+use mega_kernel::ComputePass;
 
+mod blit;
 mod camera;
-mod compute_pass;
 mod instance;
 mod material;
-mod render_pass;
+mod mega_kernel;
 
 pub async fn run() {
     env_logger::init();

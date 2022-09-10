@@ -13,7 +13,7 @@ impl RenderPass {
     ) -> Self {
         let copy_shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Copy Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("copy.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("kernels/blit.wgsl").into()),
         });
 
         let copy_bind_group_layout =
