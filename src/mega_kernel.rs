@@ -1,9 +1,8 @@
 use std::mem;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use wgpu::{util::DeviceExt, BufferUsages};
 
-use crate::{camera::CameraUniform, ConfigData, Scene};
+use crate::{camera::CameraUniform, Scene};
 
 const CONFIG_SIZE: u64 =
     (mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>())
@@ -185,10 +184,7 @@ impl ComputePass {
         self.config_data = ConfigData {
             width: new_size.width,
             height: new_size.height,
-            seed: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u32,
+            seed: rand::random(),
             clear_flag: 1,
         };
         self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -218,4 +214,13 @@ impl ComputePass {
     pub fn reset_texture(&mut self) {
         self.config_data.clear_flag = 1;
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ConfigData {
+    width: u32,
+    height: u32,
+    seed: u32,
+    clear_flag: u32,
 }

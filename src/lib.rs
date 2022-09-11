@@ -337,15 +337,6 @@ impl State {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ConfigData {
-    width: u32,
-    height: u32,
-    seed: u32,
-    clear_flag: u32,
-}
-
 pub struct Scene {
     sphere_bind_group_layout: wgpu::BindGroupLayout,
     sphere_bind_group: wgpu::BindGroup,
