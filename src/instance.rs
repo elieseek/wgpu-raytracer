@@ -23,8 +23,8 @@ impl Sphere {
 
         Self {
             material_id,
-            _padding: [0.0, 0.0],
             scale,
+            _padding: [0.0, 0.0],
             transform_matrix: transform_matrix.into(),
         }
     }

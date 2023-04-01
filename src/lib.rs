@@ -14,6 +14,7 @@ mod camera;
 mod instance;
 mod material;
 mod mega_kernel;
+// mod wavefront;
 
 pub async fn run() {
     env_logger::init();
@@ -111,6 +112,7 @@ struct State {
     scene: Scene,
     compute_pass: ComputePass,
     render_pass: RenderPass,
+    clear_flag: bool,
 }
 
 impl State {
@@ -131,8 +133,13 @@ impl State {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-                    limits: wgpu::Limits::default(),
+                    features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                        | wgpu::Features::CLEAR_COMMANDS,
+                    limits: wgpu::Limits {
+                        max_bind_groups: 5,
+                        max_storage_buffer_binding_size: 512 * 1024 * 1024,
+                        ..Default::default()
+                    },
                 },
                 None,
             )
@@ -253,6 +260,7 @@ impl State {
 
         let compute_pass = ComputePass::new(&device, &size, &compute_view, &camera_uniform, &scene);
         let render_pass = RenderPass::new(&device, format, &compute_view);
+        let clear_flag = false;
 
         Self {
             surface,
@@ -268,6 +276,7 @@ impl State {
             scene,
             compute_pass,
             render_pass,
+            clear_flag,
         }
     }
 
@@ -275,6 +284,19 @@ impl State {
         let frame = self.surface.get_current_texture()?;
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        if self.clear_flag {
+            encoder.clear_texture(
+                &self.compute_texture,
+                &wgpu::ImageSubresourceRange {
+                    aspect: wgpu::TextureAspect::All,
+                    base_mip_level: 0,
+                    mip_level_count: None,
+                    base_array_layer: 0,
+                    array_layer_count: None,
+                },
+            );
+            self.clear_flag = false;
+        }
 
         self.compute_pass
             .render(&self.device, &mut encoder, &self.size, &self.scene)?;
@@ -330,7 +352,7 @@ impl State {
             .camera_controller
             .update_camera(&mut self.camera, duration);
         if was_updated {
-            self.compute_pass.reset_texture();
+            self.clear_flag = true;
             self.camera_uniform = self.camera.get_uniform();
             self.compute_pass.update(&self.queue, self.camera_uniform);
         }

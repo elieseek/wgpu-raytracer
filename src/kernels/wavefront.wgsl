@@ -1,7 +1,33 @@
+let NUM_PIXEL_MAX = 3686400;// 2560 * 1440
+let TWICE_PIXEL_MAX =  7372800; // 2 * 2560 * 1440
+
+let RAY_TERMINATED = 0u;
+let RAY_ACTIVE = 1u;
+let RAY_HIT = 2u;
+let RAY_INACTIVE = 3u;
+
 struct Params {
     width: u32;
     height: u32;
     seed: u32;
+};
+
+struct SOAHit {
+    location: vec3<f32>;
+    normal: vec3<f32>;
+    mat_id: u32;
+};
+
+struct StructureOfArrays {
+    ray_gen: array<vec4<f32>, TWICE_PIXEL_MAX>;
+    ray_hit: array<SOAHit, NUM_PIXEL_MAX>;
+    accumulated_albedo: array<vec3<f32>, NUM_PIXEL_MAX>;
+    ray_state: array<u32, NUM_PIXEL_MAX>;
+};
+
+struct QueueLen {
+    ray_gen_len: atomic<u32>;
+    ray_hit_len: atomic<u32>;
 };
 
 struct RandRes1u {
@@ -58,6 +84,7 @@ struct Hit {
     color: vec3<f32>;
     location: vec3<f32>;
     normal: vec3<f32>;
+    mat_id: u32;
 };
 
 [[group(0), binding(0)]] var<uniform> params: Params;
@@ -67,6 +94,11 @@ struct Hit {
 
 [[group(2), binding(0)]] var<storage, read> sphere_instances: SphereInstanceArray;
 [[group(3), binding(0)]] var<storage, read> lambertians: LambertianArray;
+
+[[group(4), binding(0)]] var<storage, read_write> soa: StructureOfArrays;
+[[group(4), binding(1)]] var<storage, read_write> queue_len: QueueLen;
+
+
 
 fn get_ray(u: f32, v: f32) -> Ray {
     var ray: Ray;
@@ -97,8 +129,9 @@ fn hit_sphere(r: Ray, sphere: SphereInstance) -> Hit {
         let hit_location = r.origin + r.direction * hit_distance * 0.9999;
         hit.distance = hit_distance;
         hit.color = color;
-        hit.location = hit_location;
         hit.normal = normalize(hit_location - center);
+        hit.location = hit_location;// + 0.00001 * hit.normal;
+        hit.mat_id = sphere.material_id;
     };
 
     return hit;
@@ -119,7 +152,7 @@ fn closest_sphere_hit(r: Ray) -> Hit {
         sphere = sphere_instances.contents[i];
        
         current_hit = hit_sphere(r, sphere);
-        if (current_hit.distance > 0.0 && abs(current_hit.distance) < abs(best_hit.distance)) {
+        if (current_hit.distance > 0.0 && (abs(current_hit.distance) < abs(best_hit.distance))) {
             best_hit = current_hit;
         }; 
     }
@@ -146,7 +179,6 @@ fn rand_2f(rng: u32) -> RandRes2f {
     return RandRes2f(res, rand_res_2.rng);
 }
 
-
 fn rand_unit_vec(rng: u32) -> RandRes3f {
     let pi = 3.1415926535;
     let rand = rand_2f(rng);
@@ -158,43 +190,109 @@ fn rand_unit_vec(rng: u32) -> RandRes3f {
     return RandRes3f(vec3<f32>(x, y, z), rand.rng);
 }
 
-fn recursive_trace(r: Ray, rng: u32) -> vec3<f32> {
-    let max_depth: i32 = 30;
-    var albedo: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
-    var cur_ray: Ray = r;
-    var rng = rng;
-    for (var i: i32 = 0; i < max_depth; i=i+1) {
-        let best_hit = closest_sphere_hit(cur_ray);
+fn wf_reset(global_id: vec3<u32>) {
+    let gid = global_id.x * params.height + global_id.y;
+    soa.ray_state[gid] = RAY_TERMINATED;
+    soa.accumulated_albedo[gid] = vec3<f32>(1.0);
+}
 
-        albedo = albedo * best_hit.color;
-        if (best_hit.distance < 0.0) {
-            break
-        }
-        let rand = rand_unit_vec(rng);
-        rng = rand.rng;
-        let new_direction = normalize(best_hit.normal + rand.res);
-        cur_ray = Ray(best_hit.location, new_direction);
+fn wf_generate(global_id: vec3<u32>, rng: u32) -> u32 {
+    let gid = global_id.x * params.height + global_id.y;
+    if (global_id.x > params.width || global_id.y > params.height) {
+        return rng;
+    };
+
+    if (soa.ray_state[gid] != RAY_TERMINATED) {
+        return rng;
+    };
+
+    let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
+    let rand = rand_2f(rng);
+    let rand_xy = rand.res;
+    var rng = rand.rng;
+    let r = get_ray(pixel_coords.x + rand_xy.x / f32(params.width), pixel_coords.y + rand_xy.y / f32(params.height));
+
+    soa.accumulated_albedo[gid] = vec3<f32>(1.0);
+    soa.ray_gen[2u*gid] = vec4<f32>(r.origin, 0.0);
+    soa.ray_gen[2u*gid + 1u] = vec4<f32>(r.direction, 0.0);
+    soa.ray_state[gid] = RAY_ACTIVE;
+    return rng;
+}
+
+fn wf_extend(global_id: vec3<u32>, rng: u32) -> u32 {
+    let gid = global_id.x * params.height + global_id.y;
+    if (soa.ray_state[gid] != RAY_ACTIVE) {
+        return rng;
+    };
+    if (global_id.x > params.width || global_id.y > params.height) {
+        return rng;
+    };
+
+    let r = Ray(soa.ray_gen[2u*gid].xyz, soa.ray_gen[2u*gid + 1u].xyz);
+
+    let hit = closest_sphere_hit(r);
+
+    if (hit.distance < 0.00) {
+        soa.accumulated_albedo[gid] = soa.accumulated_albedo[gid] * hit.color;
+        soa.ray_state[gid] = RAY_INACTIVE;
+    } else {
+        soa.ray_hit[gid] = SOAHit(hit.location, hit.normal, hit.mat_id);
+        soa.ray_state[gid] = RAY_HIT;
     }
-    return albedo;
-};
+    return rng;
+}
+
+fn wf_shade(global_id: vec3<u32>, rng: u32) -> u32 {
+    let gid = global_id.x * params.height + global_id.y;
+    if (soa.ray_state[gid] != RAY_HIT) {
+        return rng;
+    };
+    if (global_id.x > params.width || global_id.y > params.height) {
+        return rng;
+    };
+    
+    let hit: SOAHit = soa.ray_hit[gid];
+    let albedo = lambertians.contents[hit.mat_id];
+    soa.accumulated_albedo[gid] = soa.accumulated_albedo[gid] * albedo;
+    let rand = rand_unit_vec(rng);
+    let new_direction = normalize(hit.normal + rand.res); 
+    soa.ray_gen[2u * gid] = vec4<f32>(hit.location, 0.0);
+    soa.ray_gen[2u * gid + 1u] = vec4<f32>(new_direction, 0.0);
+    soa.ray_state[gid] = RAY_ACTIVE;
+    return rand.rng;
+}
+
+fn wf_accumulate(global_id: vec3<u32>) {
+    let gid = global_id.x * params.height + global_id.y;
+    if (soa.ray_state[gid] != RAY_INACTIVE) {
+        return;
+    };
+    if (global_id.x > params.width || global_id.y > params.height) {
+        return;
+    };
+    
+    var pixel_color = vec4<f32>(soa.accumulated_albedo[gid], 1.0);
+    let prev = textureLoad(output_tex, vec2<i32>(global_id.xy));
+    pixel_color = pixel_color + prev;
+
+    textureStore(output_tex, vec2<i32>(global_id.xy), pixel_color);
+    soa.ray_state[gid] = RAY_TERMINATED;
+}
 
 [[stage(compute), workgroup_size(8, 4, 1)]]
 fn cs_main(
     [[builtin(global_invocation_id)]] global_id: vec3<u32>, 
     [[builtin(local_invocation_id)]] local_id: vec3<u32>
 ) {
-    let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
     var rng = params.seed + 1203793u * global_id.x + 7u * global_id.y;
-    let rand = rand_2f(rng);
-    let rand_xy = rand.res;
-    rng = rand.rng;
-    let r = get_ray(pixel_coords.x + rand_xy.x / f32(params.width), pixel_coords.y + rand_xy.y / f32(params.height));
-
-    var pixel_color = vec4<f32>(recursive_trace(r, rng), 1.0);
-
-    let prev = textureLoad(output_tex, vec2<i32>(global_id.xy));
-
-    pixel_color = pixel_color + prev;
-
-    textureStore(output_tex, vec2<i32>(global_id.xy), pixel_color);
+    let gid = global_id.x * params.height + global_id.y;
+    wf_reset(global_id);
+    for (var i = 0; i < 30; i = i+1) {
+        rng = wf_generate(global_id, rng);
+        rng = wf_extend(global_id, rng);
+        rng = wf_shade(global_id, rng);
+        wf_accumulate(global_id);
+    }
+    soa.ray_state[gid] = RAY_INACTIVE;
+    wf_accumulate(global_id);
 }

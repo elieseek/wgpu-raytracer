@@ -5,8 +5,7 @@ use wgpu::{util::DeviceExt, BufferUsages};
 use crate::{camera::CameraUniform, Scene};
 
 const CONFIG_SIZE: u64 =
-    (mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>())
-        as u64;
+    (mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>()) as u64;
 
 pub struct ComputePass {
     pub config_buffer: wgpu::Buffer,
@@ -32,7 +31,6 @@ impl ComputePass {
             width: size.width,
             height: size.height,
             seed,
-            clear_flag: 0,
         };
         let config_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Config Buffer"),
@@ -171,7 +169,6 @@ impl ComputePass {
         compute_pass.set_bind_group(3, &scene.material_bind_group, &[]);
 
         compute_pass.dispatch(size.width / 8, size.height / 4, 1);
-        self.config_data.clear_flag = 0;
         Ok(())
     }
 
@@ -185,7 +182,6 @@ impl ComputePass {
             width: new_size.width,
             height: new_size.height,
             seed: rand::random(),
-            clear_flag: 1,
         };
         self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -210,10 +206,6 @@ impl ComputePass {
             bytemuck::cast_slice(&[camera_uniform]),
         );
     }
-
-    pub fn reset_texture(&mut self) {
-        self.config_data.clear_flag = 1;
-    }
 }
 
 #[repr(C)]
@@ -222,5 +214,4 @@ pub struct ConfigData {
     width: u32,
     height: u32,
     seed: u32,
-    clear_flag: u32,
 }
