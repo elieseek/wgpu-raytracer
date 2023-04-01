@@ -30,23 +30,6 @@ struct QueueLen {
     ray_hit_len: atomic<u32>;
 };
 
-struct RandRes1u {
-    res: u32;
-    rng: u32; 
-};
-struct RandRes1f {
-    res: f32;
-    rng: u32; 
-};
-struct RandRes2f {
-    res: vec2<f32>;
-    rng: u32; 
-};
-struct RandRes3f {
-    res: vec3<f32>;
-    rng: u32; 
-};
-
 struct Camera {
     origin: vec4<f32>;
     horizontal: vec4<f32>;
@@ -97,8 +80,6 @@ struct Hit {
 
 [[group(4), binding(0)]] var<storage, read_write> soa: StructureOfArrays;
 [[group(4), binding(1)]] var<storage, read_write> queue_len: QueueLen;
-
-
 
 fn get_ray(u: f32, v: f32) -> Ray {
     var ray: Ray;
@@ -160,34 +141,35 @@ fn closest_sphere_hit(r: Ray) -> Hit {
     return best_hit;
 }
 
-fn rand(rng: u32) -> RandRes1u { //PCG RXS M XS 32/32
-    var oldstate: u32 = rng;
+fn rand(rng: ptr<function, u32>) -> u32 { //PCG RXS M XS 32/32
+    let oldstate: u32 = *rng;
     let res = ((oldstate >> ((oldstate >> 28u) + 4u)) ^ oldstate) * 277803737u;
-    return RandRes1u((res >> 22u) ^ res, rng * 747796405u + 2891336453u);
+    *rng = *rng * 747796405u + 2891336453u;
+    return (res >> 22u) ^ res;
 }
 
-fn rand_1f(rng: u32) -> RandRes1f {
+fn rand_1f(rng: ptr<function, u32>) -> f32 {
     let rand_res = rand(rng);
-    let res = f32(rand_res.res) * (1.0 / f32(0xFFFFFFFFu));
-    return RandRes1f(res, rand_res.rng);
+    let res = f32(rand_res) * (1.0 / f32(0xFFFFFFFFu));
+    return res;
 }
 
-fn rand_2f(rng: u32) -> RandRes2f {
+fn rand_2f(rng: ptr<function, u32>) -> vec2<f32> {
     let rand_res_1 = rand_1f(rng);
-    let rand_res_2 = rand_1f(rand_res_1.rng);
-    let res = vec2<f32>(rand_res_1.res, rand_res_2.res);
-    return RandRes2f(res, rand_res_2.rng);
+    let rand_res_2 = rand_1f(rng);
+    let res = vec2<f32>(rand_res_1, rand_res_2);
+    return res;
 }
 
-fn rand_unit_vec(rng: u32) -> RandRes3f {
+fn rand_unit_vec(rng: ptr<function, u32>) -> vec3<f32> {
     let pi = 3.1415926535;
     let rand = rand_2f(rng);
-    let theta = 2.0 * pi * rand.res.x;
-    let phi = acos(1.0 - 2.0 * rand.res.y);
+    let theta = 2.0 * pi * rand.x;
+    let phi = acos(1.0 - 2.0 * rand.y);
     let x = sin(phi) * cos(theta);
     let y = sin(phi) * sin(theta);
     let z = cos(phi);
-    return RandRes3f(vec3<f32>(x, y, z), rand.rng);
+    return vec3<f32>(x, y, z);
 }
 
 fn wf_reset(global_id: vec3<u32>) {
@@ -196,36 +178,34 @@ fn wf_reset(global_id: vec3<u32>) {
     soa.accumulated_albedo[gid] = vec3<f32>(1.0);
 }
 
-fn wf_generate(global_id: vec3<u32>, rng: u32) -> u32 {
+fn wf_generate(global_id: vec3<u32>, rng: ptr<function, u32>) {
     let gid = global_id.x * params.height + global_id.y;
     if (global_id.x > params.width || global_id.y > params.height) {
-        return rng;
+        return;
     };
 
     if (soa.ray_state[gid] != RAY_TERMINATED) {
-        return rng;
+        return;
     };
 
     let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
     let rand = rand_2f(rng);
-    let rand_xy = rand.res;
-    var rng = rand.rng;
+    let rand_xy = rand;
     let r = get_ray(pixel_coords.x + rand_xy.x / f32(params.width), pixel_coords.y + rand_xy.y / f32(params.height));
 
     soa.accumulated_albedo[gid] = vec3<f32>(1.0);
     soa.ray_gen[2u*gid] = vec4<f32>(r.origin, 0.0);
     soa.ray_gen[2u*gid + 1u] = vec4<f32>(r.direction, 0.0);
     soa.ray_state[gid] = RAY_ACTIVE;
-    return rng;
 }
 
-fn wf_extend(global_id: vec3<u32>, rng: u32) -> u32 {
+fn wf_extend(global_id: vec3<u32>, rng: ptr<function, u32>) {
     let gid = global_id.x * params.height + global_id.y;
     if (soa.ray_state[gid] != RAY_ACTIVE) {
-        return rng;
+        return;
     };
     if (global_id.x > params.width || global_id.y > params.height) {
-        return rng;
+        return;
     };
 
     let r = Ray(soa.ray_gen[2u*gid].xyz, soa.ray_gen[2u*gid + 1u].xyz);
@@ -239,27 +219,25 @@ fn wf_extend(global_id: vec3<u32>, rng: u32) -> u32 {
         soa.ray_hit[gid] = SOAHit(hit.location, hit.normal, hit.mat_id);
         soa.ray_state[gid] = RAY_HIT;
     }
-    return rng;
 }
 
-fn wf_shade(global_id: vec3<u32>, rng: u32) -> u32 {
+fn wf_shade(global_id: vec3<u32>, rng: ptr<function, u32>) {
     let gid = global_id.x * params.height + global_id.y;
     if (soa.ray_state[gid] != RAY_HIT) {
-        return rng;
+        return;
     };
     if (global_id.x > params.width || global_id.y > params.height) {
-        return rng;
+        return;
     };
     
     let hit: SOAHit = soa.ray_hit[gid];
     let albedo = lambertians.contents[hit.mat_id];
     soa.accumulated_albedo[gid] = soa.accumulated_albedo[gid] * albedo;
     let rand = rand_unit_vec(rng);
-    let new_direction = normalize(hit.normal + rand.res); 
+    let new_direction = normalize(hit.normal + rand); 
     soa.ray_gen[2u * gid] = vec4<f32>(hit.location, 0.0);
     soa.ray_gen[2u * gid + 1u] = vec4<f32>(new_direction, 0.0);
     soa.ray_state[gid] = RAY_ACTIVE;
-    return rand.rng;
 }
 
 fn wf_accumulate(global_id: vec3<u32>) {
@@ -288,9 +266,9 @@ fn cs_main(
     let gid = global_id.x * params.height + global_id.y;
     wf_reset(global_id);
     for (var i = 0; i < 30; i = i+1) {
-        rng = wf_generate(global_id, rng);
-        rng = wf_extend(global_id, rng);
-        rng = wf_shade(global_id, rng);
+        wf_generate(global_id, &rng);
+        wf_extend(global_id, &rng);
+        wf_shade(global_id, &rng);
         wf_accumulate(global_id);
     }
     soa.ray_state[gid] = RAY_INACTIVE;

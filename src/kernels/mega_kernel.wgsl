@@ -4,23 +4,6 @@ struct Params {
     seed: u32;
 };
 
-struct RandRes1u {
-    res: u32;
-    rng: u32; 
-};
-struct RandRes1f {
-    res: f32;
-    rng: u32; 
-};
-struct RandRes2f {
-    res: vec2<f32>;
-    rng: u32; 
-};
-struct RandRes3f {
-    res: vec3<f32>;
-    rng: u32; 
-};
-
 struct Camera {
     origin: vec4<f32>;
     horizontal: vec4<f32>;
@@ -127,42 +110,41 @@ fn closest_sphere_hit(r: Ray) -> Hit {
     return best_hit;
 }
 
-fn rand(rng: u32) -> RandRes1u { //PCG RXS M XS 32/32
-    var oldstate: u32 = rng;
+fn rand(rng: ptr<function, u32>) -> u32 { //PCG RXS M XS 32/32
+    let oldstate: u32 = *rng;
     let res = ((oldstate >> ((oldstate >> 28u) + 4u)) ^ oldstate) * 277803737u;
-    return RandRes1u((res >> 22u) ^ res, rng * 747796405u + 2891336453u);
+    *rng = *rng * 747796405u + 2891336453u;
+    return (res >> 22u) ^ res;
 }
 
-fn rand_1f(rng: u32) -> RandRes1f {
+fn rand_1f(rng: ptr<function, u32>) -> f32 {
     let rand_res = rand(rng);
-    let res = f32(rand_res.res) * (1.0 / f32(0xFFFFFFFFu));
-    return RandRes1f(res, rand_res.rng);
+    let res = f32(rand_res) * (1.0 / f32(0xFFFFFFFFu));
+    return res;
 }
 
-fn rand_2f(rng: u32) -> RandRes2f {
+fn rand_2f(rng: ptr<function, u32>) -> vec2<f32> {
     let rand_res_1 = rand_1f(rng);
-    let rand_res_2 = rand_1f(rand_res_1.rng);
-    let res = vec2<f32>(rand_res_1.res, rand_res_2.res);
-    return RandRes2f(res, rand_res_2.rng);
+    let rand_res_2 = rand_1f(rng);
+    let res = vec2<f32>(rand_res_1, rand_res_2);
+    return res;
 }
 
-
-fn rand_unit_vec(rng: u32) -> RandRes3f {
+fn rand_unit_vec(rng: ptr<function, u32>) -> vec3<f32> {
     let pi = 3.1415926535;
     let rand = rand_2f(rng);
-    let theta = 2.0 * pi * rand.res.x;
-    let phi = acos(1.0 - 2.0 * rand.res.y);
+    let theta = 2.0 * pi * rand.x;
+    let phi = acos(1.0 - 2.0 * rand.y);
     let x = sin(phi) * cos(theta);
     let y = sin(phi) * sin(theta);
     let z = cos(phi);
-    return RandRes3f(vec3<f32>(x, y, z), rand.rng);
+    return vec3<f32>(x, y, z);
 }
 
-fn recursive_trace(r: Ray, rng: u32) -> vec3<f32> {
+fn recursive_trace(r: Ray, rng: ptr<function, u32>) -> vec3<f32> {
     let max_depth: i32 = 30;
     var albedo: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
     var cur_ray: Ray = r;
-    var rng = rng;
     for (var i: i32 = 0; i < max_depth; i=i+1) {
         let best_hit = closest_sphere_hit(cur_ray);
 
@@ -171,8 +153,7 @@ fn recursive_trace(r: Ray, rng: u32) -> vec3<f32> {
             break
         }
         let rand = rand_unit_vec(rng);
-        rng = rand.rng;
-        let new_direction = normalize(best_hit.normal + rand.res);
+        let new_direction = normalize(best_hit.normal + rand);
         cur_ray = Ray(best_hit.location, new_direction);
     }
     return albedo;
@@ -184,13 +165,12 @@ fn cs_main(
     [[builtin(local_invocation_id)]] local_id: vec3<u32>
 ) {
     let pixel_coords: vec2<f32> = vec2<f32>(global_id.xy) / vec2<f32>(f32(params.width), f32(params.height));
-    var rng = params.seed + 1203793u * global_id.x + 7u * global_id.y;
-    let rand = rand_2f(rng);
-    let rand_xy = rand.res;
-    rng = rand.rng;
+    var rng: u32 = params.seed + 1203793u * global_id.x + 7u * global_id.y;
+    let rand = rand_2f(&rng);
+    let rand_xy = rand;
     let r = get_ray(pixel_coords.x + rand_xy.x / f32(params.width), pixel_coords.y + rand_xy.y / f32(params.height));
 
-    var pixel_color = vec4<f32>(recursive_trace(r, rng), 1.0);
+    var pixel_color = vec4<f32>(recursive_trace(r, &rng), 1.0);
 
     let prev = textureLoad(output_tex, vec2<i32>(global_id.xy));
 
