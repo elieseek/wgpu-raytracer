@@ -8,12 +8,14 @@ use winit::{
 
 use blit::RenderPass;
 use mega_kernel::ComputePass;
+use model::Model;
 
 mod blit;
 mod camera;
 mod instance;
 mod material;
 mod mega_kernel;
+mod model;
 // mod wavefront;
 
 pub async fn run() {
@@ -23,60 +25,32 @@ pub async fn run() {
 
     window.set_title("Raytracer");
     window.set_inner_size(winit::dpi::PhysicalSize::new(1600_u32, 900_u32));
-    window.set_cursor_grab(true).unwrap();
+    window
+        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+        .unwrap();
     window.set_cursor_visible(false);
 
-    let mut state = State::new(&window).await;
+    let mut state = State::new(window).await;
 
-    let mut window_focused = true;
     let mut now = Instant::now();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::DeviceEvent {
             device_id: _,
             event,
-        } if window_focused => {
-            state.input(&event);
+        } => {
+            state.input_device_event(&event);
         }
         Event::WindowEvent {
             window_id,
             ref event,
-        } if window_id == window.id() => {
+        } if window_id == state.window().id() => {
             match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                WindowEvent::KeyboardInput {
-                    input:
-                        KeyboardInput {
-                            state: ElementState::Pressed,
-                            virtual_keycode: Some(VirtualKeyCode::Escape),
-                            ..
-                        },
-                    ..
-                } => {
-                    window_focused = false;
-                    window.set_cursor_grab(false).unwrap();
-                    window.set_cursor_visible(true);
-                }
-                WindowEvent::MouseInput {
-                    state: winit::event::ElementState::Pressed,
-                    button: winit::event::MouseButton::Left,
-                    ..
-                } => {
-                    window_focused = true;
-                    window.set_cursor_grab(true).unwrap();
-                    window.set_cursor_visible(false);
-                }
-                WindowEvent::Resized(physical_size) => {
-                    state.resize(*physical_size);
-                }
-                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    // new_inner_size is &&mut so we have to dereference it twice
-                    state.resize(**new_inner_size);
-                }
-                _ => {}
-            }
+                _ => state.input_window_event(event),
+            };
         }
-        Event::RedrawRequested(window_id) if window_id == window.id() => {
+        Event::RedrawRequested(window_id) if window_id == state.window().id() => {
             state.update(now.elapsed().as_micros());
             now = Instant::now();
             match state.render() {
@@ -92,7 +66,7 @@ pub async fn run() {
         Event::MainEventsCleared => {
             // Redraw requested will only trigger once, unless we manually
             // request it.
-            window.request_redraw();
+            state.window().request_redraw();
         }
         _ => {}
     });
@@ -104,6 +78,8 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
+    window: Window,
+    window_focused: bool,
     compute_texture: wgpu::Texture,
     compute_view: wgpu::TextureView,
     camera: camera::Camera,
@@ -116,10 +92,13 @@ struct State {
 }
 
 impl State {
-    async fn new(window: &Window) -> Self {
+    async fn new(window: Window) -> Self {
         let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let surface = unsafe { instance.create_surface(&window) };
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+        let surface = unsafe { instance.create_surface(&window) }.unwrap();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -134,7 +113,7 @@ impl State {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                        | wgpu::Features::CLEAR_COMMANDS,
+                        | wgpu::Features::CLEAR_TEXTURE,
                     limits: wgpu::Limits {
                         max_bind_groups: 5,
                         max_storage_buffer_binding_size: 512 * 1024 * 1024,
@@ -145,13 +124,22 @@ impl State {
             )
             .await
             .unwrap();
-        let format = surface.get_preferred_format(&adapter).unwrap();
+        // let format = surface.get_preferred_format(&adapter).unwrap();
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
-            format,
+            format: surface_format,
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Immediate,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
         };
         surface.configure(&device, &config);
 
@@ -167,6 +155,7 @@ impl State {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba32Float,
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
 
         let compute_view = compute_texture.create_view(&Default::default());
@@ -175,7 +164,7 @@ impl State {
             (0.0, 0.0, 0.0).into(),
             (0.0, 0.0, 1.0).into(),
             cgmath::Vector3::unit_y(),
-            70.0,
+            75.0,
             16.0 / 9.0,
         );
 
@@ -192,7 +181,8 @@ impl State {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let sphere1 = instance::Sphere::new(0, 1.0, cgmath::vec3(0.0, 1.0, -1.0), cgmath::Deg(0.0));
+        let sphere1: instance::Sphere =
+            instance::Sphere::new(0, 1.0, cgmath::vec3(0.0, 1.0, -1.0), cgmath::Deg(0.0));
         let sphere2 =
             instance::Sphere::new(1, 1000.0, cgmath::vec3(0.0, -1000.0, 0.0), cgmath::Deg(0.0));
         let sphere3 = instance::Sphere::new(2, 1.0, cgmath::vec3(0.0, 1.0, 1.0), cgmath::Deg(0.0));
@@ -227,6 +217,100 @@ impl State {
             }],
         });
 
+        let mut obj_model = Model::new();
+        obj_model.load_obj("res/monkey.obj").await;
+
+        let position_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("position_buffer"),
+            contents: bytemuck::cast_slice(&obj_model.positions),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let normal_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("position_buffer"),
+            contents: bytemuck::cast_slice(&obj_model.normals),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("index_buffer"),
+            contents: bytemuck::cast_slice(&obj_model.indices),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let normal_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("index_buffer"),
+            contents: bytemuck::cast_slice(&obj_model.normal_indices),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let mesh_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mesh_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let mesh_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mesh_bind_group"),
+            layout: &mesh_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: position_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: index_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: normal_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: normal_index_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("material_bind_group_layout"),
@@ -254,12 +338,14 @@ impl State {
         let scene = Scene {
             sphere_bind_group_layout,
             sphere_bind_group,
+            mesh_bind_group_layout,
+            mesh_bind_group,
             material_bind_group_layout,
             material_bind_group,
         };
 
         let compute_pass = ComputePass::new(&device, &size, &compute_view, &camera_uniform, &scene);
-        let render_pass = RenderPass::new(&device, format, &compute_view);
+        let render_pass = RenderPass::new(&device, surface_format, &compute_view);
         let clear_flag = false;
 
         Self {
@@ -268,6 +354,8 @@ impl State {
             queue,
             config,
             size,
+            window,
+            window_focused: true,
             compute_texture,
             compute_view,
             camera,
@@ -278,6 +366,10 @@ impl State {
             render_pass,
             clear_flag,
         }
+    }
+
+    fn window(&self) -> &Window {
+        &self.window
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -333,6 +425,7 @@ impl State {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::STORAGE_BINDING
                     | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             });
 
             self.compute_view = self.compute_texture.create_view(&Default::default());
@@ -343,8 +436,50 @@ impl State {
         }
     }
 
-    fn input(&mut self, event: &DeviceEvent) -> bool {
-        self.camera_controller.process_events(event)
+    fn input_device_event(&mut self, event: &DeviceEvent) -> bool {
+        if self.window_focused {
+            self.camera_controller.process_events(event);
+        }
+        false
+    }
+
+    fn input_window_event(&mut self, event: &WindowEvent) {
+        match event {
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        state: ElementState::Pressed,
+                        virtual_keycode: Some(VirtualKeyCode::Escape),
+                        ..
+                    },
+                ..
+            } => {
+                self.window_focused = false;
+                self.window
+                    .set_cursor_grab(winit::window::CursorGrabMode::None)
+                    .unwrap();
+                self.window.set_cursor_visible(true);
+            }
+            WindowEvent::MouseInput {
+                state: winit::event::ElementState::Pressed,
+                button: winit::event::MouseButton::Left,
+                ..
+            } => {
+                self.window_focused = true;
+                self.window
+                    .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                    .unwrap();
+                self.window.set_cursor_visible(false);
+            }
+            WindowEvent::Resized(physical_size) => {
+                self.resize(*physical_size);
+            }
+            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                // new_inner_size is &&mut so we have to dereference it twice
+                self.resize(**new_inner_size);
+            }
+            _ => {}
+        }
     }
 
     fn update(&mut self, duration: u128) {
@@ -362,6 +497,8 @@ impl State {
 pub struct Scene {
     sphere_bind_group_layout: wgpu::BindGroupLayout,
     sphere_bind_group: wgpu::BindGroup,
+    mesh_bind_group_layout: wgpu::BindGroupLayout,
+    mesh_bind_group: wgpu::BindGroup,
     material_bind_group_layout: wgpu::BindGroupLayout,
     material_bind_group: wgpu::BindGroup,
 }

@@ -211,7 +211,7 @@ impl CameraController {
             camera.lower_left_corner = horizontal_rotation
                 .rotate_point(camera.lower_left_corner - camera.origin.to_vec())
                 + camera.origin.to_vec();
-            
+
             let vertical_rotation = cgmath::Quaternion::from_axis_angle(
                 camera.horizontal.normalize(),
                 cgmath::Rad(
@@ -219,7 +219,8 @@ impl CameraController {
                         * self.mouse_delta.y
                         * std::f32::consts::FRAC_2_PI,
                 ),
-            ).normalize();
+            )
+            .normalize();
 
             // Clamp vertical rotation to prevent tipping backwards
             let resulting_vertical = vertical_rotation.rotate_vector(camera.vertical);
@@ -227,7 +228,7 @@ impl CameraController {
                 camera.vertical = resulting_vertical;
                 camera.lower_left_corner = vertical_rotation
                     .rotate_point(camera.lower_left_corner - camera.origin.to_vec())
-                    + camera.origin.to_vec();  
+                    + camera.origin.to_vec();
             }
             self.mouse_delta = cgmath::Vector2::zero();
             self.is_mouse_dragged = false;

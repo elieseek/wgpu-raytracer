@@ -116,7 +116,7 @@ fn hit_sphere(r: Ray, sphere: SphereInstance) -> Hit {
     };
 
     return hit;
-};
+}
 
 fn closest_sphere_hit(r: Ray) -> Hit {
     var transform_mat: mat4x4<f32>;

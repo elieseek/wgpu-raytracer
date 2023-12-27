@@ -4,8 +4,12 @@ use wgpu::{util::DeviceExt, BufferUsages};
 
 use crate::{camera::CameraUniform, Scene};
 
+// Config data: width, height, depth, seed
 const CONFIG_SIZE: u64 =
-    (mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>()) as u64;
+    (mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u32>())
+        as u64;
+
+pub const DEFAULT_DEPTH: u32 = 30;
 
 pub struct ComputePass {
     pub config_buffer: wgpu::Buffer,
@@ -16,6 +20,7 @@ pub struct ComputePass {
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group: wgpu::BindGroup,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
+    pub preview_next_frame: bool,
 }
 
 impl ComputePass {
@@ -30,6 +35,7 @@ impl ComputePass {
         let config_data = ConfigData {
             width: size.width,
             height: size.height,
+            depth: DEFAULT_DEPTH,
             seed,
         };
         let config_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -39,7 +45,7 @@ impl ComputePass {
             mapped_at_creation: false,
         });
 
-        let cs_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let cs_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Compute Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("kernels/mega_kernel.wgsl").into()),
         });
@@ -107,6 +113,7 @@ impl ComputePass {
                     &bind_group_layout,
                     &camera_bind_group_layout,
                     &scene.sphere_bind_group_layout,
+                    &scene.mesh_bind_group_layout,
                     &scene.material_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
@@ -143,6 +150,7 @@ impl ComputePass {
             camera_buffer,
             camera_bind_group,
             camera_bind_group_layout,
+            preview_next_frame: false,
         }
     }
 
@@ -154,6 +162,12 @@ impl ComputePass {
         scene: &Scene,
     ) -> Result<(), wgpu::SurfaceError> {
         self.config_data.seed = rand::random();
+        self.config_data.depth = DEFAULT_DEPTH;
+        if self.preview_next_frame {
+            self.config_data.depth = 1;
+            self.preview_next_frame = false;
+        }
+
         let config_host = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: bytemuck::bytes_of(&self.config_data),
@@ -166,9 +180,10 @@ impl ComputePass {
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
         compute_pass.set_bind_group(1, &self.camera_bind_group, &[]);
         compute_pass.set_bind_group(2, &scene.sphere_bind_group, &[]);
-        compute_pass.set_bind_group(3, &scene.material_bind_group, &[]);
+        compute_pass.set_bind_group(3, &scene.mesh_bind_group, &[]);
+        compute_pass.set_bind_group(4, &scene.material_bind_group, &[]);
 
-        compute_pass.dispatch(size.width / 8, size.height / 4, 1);
+        compute_pass.dispatch_workgroups(size.width / 8, size.height / 4, 1);
         Ok(())
     }
 
@@ -178,9 +193,11 @@ impl ComputePass {
         new_size: &winit::dpi::PhysicalSize<u32>,
         output_view: &wgpu::TextureView,
     ) {
+        self.preview_next_frame = true;
         self.config_data = ConfigData {
             width: new_size.width,
             height: new_size.height,
+            depth: DEFAULT_DEPTH,
             seed: rand::random(),
         };
         self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -200,6 +217,7 @@ impl ComputePass {
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue, camera_uniform: CameraUniform) {
+        self.preview_next_frame = true;
         queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -213,5 +231,6 @@ impl ComputePass {
 pub struct ConfigData {
     width: u32,
     height: u32,
+    depth: u32,
     seed: u32,
 }
