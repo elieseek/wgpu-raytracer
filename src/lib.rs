@@ -8,14 +8,13 @@ use winit::{
 
 use blit::RenderPass;
 use mega_kernel::ComputePass;
-use model::Model;
+use instance::Mesh;
 
 mod blit;
 mod camera;
 mod instance;
 mod material;
 mod mega_kernel;
-mod model;
 // mod wavefront;
 
 pub async fn run() {
@@ -217,7 +216,7 @@ impl State {
             }],
         });
 
-        let mut obj_model = Model::new();
+        let mut obj_model = Mesh::new();
         obj_model.load_obj("res/monkey.obj").await;
 
         let position_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
