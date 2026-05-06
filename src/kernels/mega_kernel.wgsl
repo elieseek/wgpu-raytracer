@@ -107,6 +107,9 @@ fn hit_sphere(r: Ray, sphere: SphereInstance) -> Hit {
 
 // Möller–Trumbore intersection algorithm
 fn hit_triangle(r: Ray, triangle_index: u32) -> Hit {
+    var hit: Hit;
+    hit.distance = -1.;
+    hit.color = vec3<f32>(0., 0., 0.);
     let vertices = mesh_indices[triangle_index];
     let triangle = Triangle(
         mesh_positions[ vertices[0] ].xyz, mesh_positions[ vertices[1] ].xyz, mesh_positions[ vertices[2] ].xyz
@@ -116,10 +119,6 @@ fn hit_triangle(r: Ray, triangle_index: u32) -> Hit {
     let edge2 = triangle.c - triangle.a;
     let ray_cross_e2 = cross(r.direction, edge2);
     let det = dot(edge1, ray_cross_e2);
-
-    var hit: Hit;
-    hit.distance = -1.;
-    hit.color = vec3<f32>(1., 0., 0.);
 
     // Ray is parallel to triangle
     if (det > - epsilon && det < epsilon) {
@@ -144,10 +143,14 @@ fn hit_triangle(r: Ray, triangle_index: u32) -> Hit {
     let t = inv_det * dot(edge2, s_cross_e1);
 
     if (t > epsilon) {
-        hit.location = r.origin + r.direction * t * 0.9999;
-        hit.distance = t;
+        let normal = cross(edge1, edge2);
         let ni = mesh_normal_indices[triangle_index];
-        hit.normal = normalize(cross(edge1, edge2));
+        hit.normal = normalize(normal);
+        if dot(hit.normal, r.direction) > 0. {
+            hit.color = vec3<f32>(0., 0., 0.);
+        }
+        hit.location = r.origin + hit.normal*1e-5 +  r.direction * t;
+        hit.distance = t;
         return hit;
     }
     return hit;
@@ -242,7 +245,8 @@ fn recursive_trace(r: Ray, rng: ptr<function, u32>) -> vec3<f32> {
             break;
         }
         let rand = rand_unit_vec(rng);
-        let new_direction = normalize(best_hit.normal + rand);
+        let new_direction = normalize((best_hit.normal + rand));
+
         cur_ray = Ray(best_hit.location, new_direction);
     }
     return albedo;

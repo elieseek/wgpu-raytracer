@@ -163,10 +163,10 @@ impl ComputePass {
     ) -> Result<(), wgpu::SurfaceError> {
         self.config_data.seed = rand::random();
         self.config_data.depth = DEFAULT_DEPTH;
-        if self.preview_next_frame {
-            self.config_data.depth = 1;
-            self.preview_next_frame = false;
-        }
+        // if self.preview_next_frame {
+        //     self.config_data.depth = 1;
+        //     self.preview_next_frame = false;
+        // }
 
         let config_host = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,

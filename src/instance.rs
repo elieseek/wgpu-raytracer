@@ -1,4 +1,6 @@
-use cgmath::Rotation3;
+use std::rc::Rc;
+
+use cgmath::{Rotation3, Point3, Vector3, ElementWise};
 use tobj::{self, LoadOptions};
 
 #[repr(C)]
@@ -106,5 +108,130 @@ impl Mesh {
             }
         }
     }
+
+    //Todo: handle panics gracefully
+    fn get_triangle(self, index: usize) -> Triangle {
+        let indices = self.indices[index];
+        let p1 = *self.positions.get(indices[0] as usize).unwrap();
+        let p2 = *self.positions.get(indices[1] as usize).unwrap();
+        let p3 = *self.positions.get(indices[2] as usize).unwrap();
+        
+        Triangle {
+            p1: Point3::new(p1[0], p1[1], p1[2]),
+            p2: Point3::new(p2[0], p2[1], p2[2]),
+            p3: Point3::new(p3[0], p3[1], p3[2]),
+        }
+    }
 }
 
+struct Triangle {
+    p1: Point3<f32>,
+    p2: Point3<f32>,
+    p3: Point3<f32>,
+}
+
+impl Triangle {
+    fn get_bounds(&self) -> AABB {
+        let min_point = [0, 1, 2].map(|i| [self.p1[i], self.p2[i], self.p3[i]].into_iter().reduce(f32::min).unwrap());
+        let max_point = [0, 1, 2].map(|i| [self.p1[i], self.p2[i], self.p3[i]].into_iter().reduce(f32::max).unwrap());
+
+        AABB {
+            min_point: Point3::new(min_point[0], min_point[1], min_point[2]),
+            max_point: Point3::new(max_point[0], max_point[1], max_point[2]),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AABB {
+    min_point: Point3<f32>,
+    max_point: Point3<f32>,
+}
+
+impl AABB {
+    fn union(box1: AABB, box2: AABB) -> AABB {
+        let min_point = [0,1,2].map(|i| [box1.min_point[i], box2.min_point[i]].into_iter().reduce(f32::min).unwrap());
+        let max_point = [0,1,2].map(|i| [box1.max_point[i], box2.max_point[i]].into_iter().reduce(f32::max).unwrap());
+
+        AABB {
+            min_point: Point3::new(min_point[0], min_point[1], min_point[2]),
+            max_point: Point3::new(max_point[0], max_point[1], max_point[2]),
+        }
+    }
+
+    fn centroid(self) -> Point3<f32> {
+        (0.5 * self.min_point).add_element_wise(0.5 * self.max_point)
+    }
+
+    fn surface_area(self) -> f32 {
+        let d = self.max_point - self.min_point;
+        2. * (d.x * d.y + d.x * d.z + d.y * d.z)
+    }
+
+
+}
+
+struct BVH {
+    max_prims_in_node: isize,
+    primitives: Vec<Triangle>,
+    linear_bvh_node: bool,
+}
+
+impl BVH {
+    fn new(&self, primitives: Vec<Triangle>) -> BVH {
+        // Initialise BVHBuildNode for primitive range
+        todo!()
+    }
+    
+    fn get_bounds_array(primitives: Vec<Triangle>) -> Vec<BVHPrimitive> {
+        let mut bounds_array = vec![];
+        for i in 0..primitives.len() {
+            bounds_array.push(
+                BVHPrimitive {
+                    index: i,
+                    aabb: primitives[i].get_bounds(),
+                }
+                 
+            );
+        };
+
+        bounds_array
+    }
+}
+
+struct BVHPrimitive {
+    index: usize,
+    aabb: AABB,
+}
+
+struct BVHBuildNode {
+    aabb: AABB,
+    left: Option<BVHBuildNodeRef>,
+    right: Option<BVHBuildNodeRef>,
+    split_axis: i64,
+    first_prim_offset: isize,
+    n_primitives: isize,   
+}
+
+type BVHBuildNodeRef = Rc<BVHBuildNode>;
+
+
+impl BVHBuildNode {
+    fn new(self, first: isize, n: isize, aabb: &AABB) -> BVHBuildNode {
+        BVHBuildNode {
+            aabb: *aabb,
+            left: None,
+            right: None,
+            split_axis: 0,
+            first_prim_offset: first,
+            n_primitives: n,
+        }
+    }
+    fn init_interior(&mut self, axis: i64, c_0: &BVHBuildNodeRef, c_1: &BVHBuildNodeRef) {
+        self.split_axis = axis;
+        self.left = Some(Rc::clone(&c_0));
+        self.right = Some(Rc::clone(&c_1));
+        self.aabb = AABB::union(c_0.aabb, c_1.aabb);
+        self.n_primitives = 0;
+    }
+}
