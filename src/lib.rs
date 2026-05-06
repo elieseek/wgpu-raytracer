@@ -1,9 +1,11 @@
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 use wgpu::{util::DeviceExt, Extent3d};
 use winit::{
+    application::ApplicationHandler,
     event::*,
-    event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{CursorGrabMode, Window, WindowAttributes, WindowId},
 };
 
 use blit::RenderPass;
@@ -19,65 +21,95 @@ mod mega_kernel;
 
 pub async fn run() {
     env_logger::init();
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(ControlFlow::Poll);
 
-    window.set_title("Raytracer");
-    window.set_inner_size(winit::dpi::PhysicalSize::new(1600_u32, 900_u32));
-    window
-        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-        .unwrap();
-    window.set_cursor_visible(false);
+    let mut app = App::default();
+    event_loop.run_app(&mut app).unwrap();
+}
 
-    let mut state = State::new(window).await;
+#[derive(Default)]
+struct App {
+    state: Option<State>,
+    last_frame: Option<Instant>,
+}
 
-    let mut now = Instant::now();
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.state.is_some() {
+            return;
+        }
 
-    event_loop.run(move |event, _, control_flow| match event {
-        Event::DeviceEvent {
-            device_id: _,
-            event,
-        } => {
+        let window = event_loop
+            .create_window(
+                WindowAttributes::default()
+                    .with_title("Raytracer")
+                    .with_inner_size(winit::dpi::PhysicalSize::new(1600_u32, 900_u32)),
+            )
+            .unwrap();
+        let window = Arc::new(window);
+        window.set_cursor_grab(CursorGrabMode::Confined).unwrap();
+        window.set_cursor_visible(false);
+
+        self.state = Some(pollster::block_on(State::new(window)));
+        self.last_frame = Some(Instant::now());
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        if window_id != state.window().id() {
+            return;
+        }
+
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+                let duration = self
+                    .last_frame
+                    .replace(now)
+                    .map(|last_frame| now.duration_since(last_frame).as_micros())
+                    .unwrap_or_default();
+                state.update(duration);
+                state.render();
+            }
+            event => state.input_window_event(&event),
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        if let Some(state) = self.state.as_mut() {
             state.input_device_event(&event);
         }
-        Event::WindowEvent {
-            window_id,
-            ref event,
-        } if window_id == state.window().id() => {
-            match event {
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                _ => state.input_window_event(event),
-            };
-        }
-        Event::RedrawRequested(window_id) if window_id == state.window().id() => {
-            state.update(now.elapsed().as_micros());
-            now = Instant::now();
-            match state.render() {
-                Ok(_) => {}
-                // Reconfigure the surface if lost
-                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                // The system is out of memory, we should probably quit
-                Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                // All other errors (Outdated, Timeout) should be resolved by the next frame
-                Err(e) => eprintln!("{:?}", e),
-            }
-        }
-        Event::MainEventsCleared => {
-            // Redraw requested will only trigger once, unless we manually
-            // request it.
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(state) = self.state.as_ref() {
             state.window().request_redraw();
         }
-        _ => {}
-    });
+    }
 }
 
 struct State {
-    surface: wgpu::Surface,
+    instance: wgpu::Instance,
+    surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    window: Window,
+    window: Arc<Window>,
     window_focused: bool,
     compute_texture: wgpu::Texture,
     compute_view: wgpu::TextureView,
@@ -91,13 +123,13 @@ struct State {
 }
 
 impl State {
-    async fn new(window: Window) -> Self {
+    async fn new(window: Arc<Window>) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
-        let surface = unsafe { instance.create_surface(&window) }.unwrap();
+        let surface = instance.create_surface(window.clone()).unwrap();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -111,15 +143,15 @@ impl State {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                    required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                         | wgpu::Features::CLEAR_TEXTURE,
-                    limits: wgpu::Limits {
+                    required_limits: wgpu::Limits {
                         max_bind_groups: 5,
                         max_storage_buffer_binding_size: 512 * 1024 * 1024,
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
-                None,
             )
             .await
             .unwrap();
@@ -131,12 +163,21 @@ impl State {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
+        let present_mode = if surface_caps
+            .present_modes
+            .contains(&wgpu::PresentMode::Immediate)
+        {
+            wgpu::PresentMode::Immediate
+        } else {
+            wgpu::PresentMode::Fifo
+        };
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::Immediate,
+            present_mode,
+            desired_maximum_frame_latency: 2,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
@@ -348,6 +389,7 @@ impl State {
         let clear_flag = false;
 
         Self {
+            instance,
             surface,
             device,
             queue,
@@ -371,8 +413,24 @@ impl State {
         &self.window
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let frame = self.surface.get_current_texture()?;
+    fn render(&mut self) {
+        let frame = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                self.recreate_surface();
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                eprintln!("Surface validation error while acquiring the next frame");
+                return;
+            }
+        };
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         if self.clear_flag {
@@ -390,16 +448,20 @@ impl State {
         }
 
         self.compute_pass
-            .render(&self.device, &mut encoder, &self.size, &self.scene)?;
+            .render(&self.device, &mut encoder, &self.size, &self.scene);
 
         self.render_pass.render(
             &mut encoder,
             &frame.texture.create_view(&Default::default()),
-        )?;
+        );
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
-        Ok(())
+    }
+
+    fn recreate_surface(&mut self) {
+        self.surface = self.instance.create_surface(self.window.clone()).unwrap();
+        self.surface.configure(&self.device, &self.config);
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -445,17 +507,17 @@ impl State {
     fn input_window_event(&mut self, event: &WindowEvent) {
         match event {
             WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
+                event:
+                    KeyEvent {
                         state: ElementState::Pressed,
-                        virtual_keycode: Some(VirtualKeyCode::Escape),
+                        physical_key: PhysicalKey::Code(KeyCode::Escape),
                         ..
                     },
                 ..
             } => {
                 self.window_focused = false;
                 self.window
-                    .set_cursor_grab(winit::window::CursorGrabMode::None)
+                    .set_cursor_grab(CursorGrabMode::None)
                     .unwrap();
                 self.window.set_cursor_visible(true);
             }
@@ -466,16 +528,15 @@ impl State {
             } => {
                 self.window_focused = true;
                 self.window
-                    .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                    .set_cursor_grab(CursorGrabMode::Confined)
                     .unwrap();
                 self.window.set_cursor_visible(false);
             }
             WindowEvent::Resized(physical_size) => {
                 self.resize(*physical_size);
             }
-            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                // new_inner_size is &&mut so we have to dereference it twice
-                self.resize(**new_inner_size);
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.resize(self.window.inner_size());
             }
             _ => {}
         }

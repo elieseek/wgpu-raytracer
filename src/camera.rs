@@ -1,7 +1,10 @@
 use std::f32::consts::PI;
 
 use cgmath::prelude::*;
-use winit::event::{DeviceEvent, ElementState, VirtualKeyCode};
+use winit::{
+    event::{DeviceEvent, ElementState},
+    keyboard::{KeyCode, PhysicalKey},
+};
 
 const MOUSE_SCALING: f32 = 0.0000017;
 
@@ -102,32 +105,32 @@ impl CameraController {
         match event {
             DeviceEvent::Key(keyboard_input) => {
                 let is_pressed = keyboard_input.state == ElementState::Pressed;
-                match keyboard_input.virtual_keycode.unwrap() {
-                    VirtualKeyCode::W | VirtualKeyCode::Up => {
+                match keyboard_input.physical_key {
+                    PhysicalKey::Code(KeyCode::KeyW) | PhysicalKey::Code(KeyCode::ArrowUp) => {
                         self.is_forward_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::A | VirtualKeyCode::Left => {
+                    PhysicalKey::Code(KeyCode::KeyA) | PhysicalKey::Code(KeyCode::ArrowLeft) => {
                         self.is_left_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::S | VirtualKeyCode::Down => {
+                    PhysicalKey::Code(KeyCode::KeyS) | PhysicalKey::Code(KeyCode::ArrowDown) => {
                         self.is_backward_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::D | VirtualKeyCode::Right => {
+                    PhysicalKey::Code(KeyCode::KeyD) | PhysicalKey::Code(KeyCode::ArrowRight) => {
                         self.is_right_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::Space => {
+                    PhysicalKey::Code(KeyCode::Space) => {
                         self.is_up_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::LControl => {
+                    PhysicalKey::Code(KeyCode::ControlLeft) => {
                         self.is_down_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::LShift => {
+                    PhysicalKey::Code(KeyCode::ShiftLeft) => {
                         self.is_speed_boost = is_pressed;
                         true
                     }

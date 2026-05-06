@@ -110,20 +110,22 @@ impl ComputePass {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
                 bind_group_layouts: &[
-                    &bind_group_layout,
-                    &camera_bind_group_layout,
-                    &scene.sphere_bind_group_layout,
-                    &scene.mesh_bind_group_layout,
-                    &scene.material_bind_group_layout,
+                    Some(&bind_group_layout),
+                    Some(&camera_bind_group_layout),
+                    Some(&scene.sphere_bind_group_layout),
+                    Some(&scene.mesh_bind_group_layout),
+                    Some(&scene.material_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
 
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Compute Pipeline"),
             layout: Some(&compute_pipeline_layout),
             module: &cs_module,
-            entry_point: "cs_main",
+            entry_point: Some("cs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -160,13 +162,13 @@ impl ComputePass {
         encoder: &mut wgpu::CommandEncoder,
         size: &winit::dpi::PhysicalSize<u32>,
         scene: &Scene,
-    ) -> Result<(), wgpu::SurfaceError> {
+    ) {
         self.config_data.seed = rand::random();
         self.config_data.depth = DEFAULT_DEPTH;
-        // if self.preview_next_frame {
-        //     self.config_data.depth = 1;
-        //     self.preview_next_frame = false;
-        // }
+        if self.preview_next_frame {
+            self.config_data.depth = 1;
+            self.preview_next_frame = false;
+        }
 
         let config_host = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
@@ -184,7 +186,6 @@ impl ComputePass {
         compute_pass.set_bind_group(4, &scene.material_bind_group, &[]);
 
         compute_pass.dispatch_workgroups(size.width / 8, size.height / 4, 1);
-        Ok(())
     }
 
     pub fn resize(
