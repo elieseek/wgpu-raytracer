@@ -19,6 +19,7 @@ pub struct ComputePass {
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub preview_next_frame: bool,
 }
@@ -115,6 +116,7 @@ impl ComputePass {
                     Some(&scene.sphere_bind_group_layout),
                     Some(&scene.mesh_bind_group_layout),
                     Some(&scene.material_bind_group_layout),
+                    Some(&scene.bvh_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
@@ -184,6 +186,7 @@ impl ComputePass {
         compute_pass.set_bind_group(2, &scene.sphere_bind_group, &[]);
         compute_pass.set_bind_group(3, &scene.mesh_bind_group, &[]);
         compute_pass.set_bind_group(4, &scene.material_bind_group, &[]);
+        compute_pass.set_bind_group(5, &scene.bvh_bind_group, &[]);
 
         compute_pass.dispatch_workgroups(size.width / 8, size.height / 4, 1);
     }

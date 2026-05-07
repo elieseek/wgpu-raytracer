@@ -10,7 +10,7 @@ use winit::{
 
 use blit::RenderPass;
 use mega_kernel::ComputePass;
-use instance::Mesh;
+use instance::{Mesh, BVH};
 
 mod blit;
 mod camera;
@@ -146,7 +146,7 @@ impl State {
                     required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                         | wgpu::Features::CLEAR_TEXTURE,
                     required_limits: wgpu::Limits {
-                        max_bind_groups: 5,
+                        max_bind_groups: 6,
                         max_storage_buffer_binding_size: 512 * 1024 * 1024,
                         ..Default::default()
                     },
@@ -375,6 +375,61 @@ impl State {
             }],
         });
 
+        let bvh = BVH::build(&obj_model, 2);
+
+        let bvh_node_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("bvh_node_buffer"),
+            contents: bytemuck::cast_slice(&bvh.nodes),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let bvh_triangle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("bvh_triangle_buffer"),
+            contents: bytemuck::cast_slice(&bvh.triangle_indices),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bvh_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bvh_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let bvh_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bvh_bind_group"),
+            layout: &bvh_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: bvh_node_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: bvh_triangle_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
         let scene = Scene {
             sphere_bind_group_layout,
             sphere_bind_group,
@@ -382,6 +437,8 @@ impl State {
             mesh_bind_group,
             material_bind_group_layout,
             material_bind_group,
+            bvh_bind_group_layout,
+            bvh_bind_group,
         };
 
         let compute_pass = ComputePass::new(&device, &size, &compute_view, &camera_uniform, &scene);
@@ -561,4 +618,6 @@ pub struct Scene {
     mesh_bind_group: wgpu::BindGroup,
     material_bind_group_layout: wgpu::BindGroupLayout,
     material_bind_group: wgpu::BindGroup,
+    bvh_bind_group_layout: wgpu::BindGroupLayout,
+    bvh_bind_group: wgpu::BindGroup,
 }

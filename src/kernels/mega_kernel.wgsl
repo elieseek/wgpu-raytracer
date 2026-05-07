@@ -56,6 +56,15 @@ struct Hit {
     normal: vec3<f32>,
 };
 
+struct BVHNode {
+    bbox_min: vec4<f32>,
+    bbox_max: vec4<f32>,
+    left_child: u32,
+    right_child: u32,
+    first_triangle: u32,
+    n_triangles: u32,
+};
+
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var output_tex: texture_storage_2d<rgba32float, read_write>;
 
@@ -67,6 +76,8 @@ struct Hit {
 @group(3) @binding(2) var<storage, read> mesh_normals: array<vec3<f32>>;
 @group(3) @binding(3) var<storage, read> mesh_normal_indices: array<vec3<u32>>;
 @group(4) @binding(0) var<storage, read> lambertians: LambertianArray;
+@group(5) @binding(0) var<storage, read> bvh_nodes: array<BVHNode>;
+@group(5) @binding(1) var<storage, read> bvh_triangle_indices: array<u32>;
 
 fn get_ray(u: f32, v: f32) -> Ray {
     var ray: Ray;
@@ -179,23 +190,99 @@ fn closest_sphere_hit(r: Ray) -> Hit {
     return best_hit;
 }
 
-fn closest_triangle_hit(r: Ray) -> Hit {
-    var color: vec3<f32>;
-    var num_instances: u32 = bitcast<u32>(arrayLength(&mesh_indices));
-    var current_hit: Hit;
+fn ray_aabb_intersect(r: Ray, bmin: vec4<f32>, bmax: vec4<f32>) -> bool {
+    var tmin = 0.0;
+    var tmax = 3.402823e+38;
+
+    if (abs(r.direction.x) < 1.0e-20) {
+        if (r.origin.x < bmin.x || r.origin.x > bmax.x) {
+            return false;
+        }
+    } else {
+        let inv = 1.0 / r.direction.x;
+        var t0 = (bmin.x - r.origin.x) * inv;
+        var t1 = (bmax.x - r.origin.x) * inv;
+        if (t0 > t1) { let tmp = t0; t0 = t1; t1 = tmp; }
+        tmin = max(tmin, t0);
+        tmax = min(tmax, t1);
+    }
+
+    if (abs(r.direction.y) < 1.0e-20) {
+        if (r.origin.y < bmin.y || r.origin.y > bmax.y) {
+            return false;
+        }
+    } else {
+        let inv = 1.0 / r.direction.y;
+        var t0 = (bmin.y - r.origin.y) * inv;
+        var t1 = (bmax.y - r.origin.y) * inv;
+        if (t0 > t1) { let tmp = t0; t0 = t1; t1 = tmp; }
+        tmin = max(tmin, t0);
+        tmax = min(tmax, t1);
+    }
+
+    if (abs(r.direction.z) < 1.0e-20) {
+        if (r.origin.z < bmin.z || r.origin.z > bmax.z) {
+            return false;
+        }
+    } else {
+        let inv = 1.0 / r.direction.z;
+        var t0 = (bmin.z - r.origin.z) * inv;
+        var t1 = (bmax.z - r.origin.z) * inv;
+        if (t0 > t1) { let tmp = t0; t0 = t1; t1 = tmp; }
+        tmin = max(tmin, t0);
+        tmax = min(tmax, t1);
+    }
+
+    return tmax >= max(tmin, 0.0);
+}
+
+fn intersect_bvh(r: Ray) -> Hit {
     var best_hit: Hit;
     let t = 0.5 * (r.direction.y + 1.0);
     best_hit.distance = -10000000.0;
     best_hit.color = (1.0 - t) * vec3<f32>(1.0, 1.0, 1.0) + t * vec3<f32>(0.5, 0.7, 1.0);
-    for (var i: u32 = 0u; i < num_instances; i=i+1u) {
-        current_hit = hit_triangle(r, i);
-        current_hit.color = current_hit.normal;
-        if (current_hit.distance > 0.0 && abs(current_hit.distance) < abs(best_hit.distance)) {
-            best_hit = current_hit;
-        }; 
+
+    let num_nodes = arrayLength(&bvh_nodes);
+    if (num_nodes == 0u) {
+        return best_hit;
+    }
+
+    var stack: array<u32, 64>;
+    var sp: u32 = 0u;
+    stack[sp] = 0u;
+    sp = sp + 1u;
+
+    while (sp > 0u) {
+        sp = sp - 1u;
+        let node_idx = stack[sp];
+        let node = bvh_nodes[node_idx];
+
+        if (!ray_aabb_intersect(r, node.bbox_min, node.bbox_max)) {
+            continue;
+        }
+
+        if (node.n_triangles > 0u) {
+            for (var i = 0u; i < node.n_triangles; i = i + 1u) {
+                let tri_idx = bvh_triangle_indices[node.first_triangle + i];
+                var current_hit = hit_triangle(r, tri_idx);
+                current_hit.color = current_hit.normal;
+                if (current_hit.distance > 0.0 && abs(current_hit.distance) < abs(best_hit.distance)) {
+                    best_hit = current_hit;
+                }
+            }
+        } else {
+            stack[sp] = node.right_child;
+            sp = sp + 1u;
+            stack[sp] = node.left_child;
+            sp = sp + 1u;
+        }
     }
 
     return best_hit;
+}
+
+fn closest_triangle_hit(r: Ray) -> Hit {
+    return intersect_bvh(r);
 }
 
 fn rand(rng: ptr<function, u32>) -> u32 { //PCG RXS M XS 32/32
