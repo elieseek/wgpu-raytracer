@@ -215,13 +215,13 @@ impl State {
         let camera_uniform = camera.get_uniform();
         let camera_controller = camera::CameraController::new(5e-6);
 
-        let grey = material::Lambertian::new([0.8, 0.8, 0.8]);
-        let green = material::Lambertian::new([0.2, 0.85, 0.2]);
-        let purple = material::Lambertian::new([0.8, 0.0, 0.8]);
+        let mat0 = material::GpuMaterial::diffuse([0.8, 0.8, 0.8]);
+        let mat1 = material::GpuMaterial::diffuse([0.2, 0.85, 0.2]);
+        let mat2 = material::GpuMaterial::dielectric(1.5, 0.0);
 
-        let lambertian_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("lambertian_buffer"),
-            contents: bytemuck::cast_slice(&[grey, green, purple]),
+        let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("material_buffer"),
+            contents: bytemuck::cast_slice(&[mat0, mat1, mat2]),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -262,6 +262,7 @@ impl State {
         });
 
         let mut obj_model = Mesh::new();
+        obj_model.material_id = 2; // grey diffuse
         obj_model.load_obj("res/monkey.obj").await;
 
         let position_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -337,7 +338,7 @@ impl State {
             layout: &material_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: lambertian_buffer.as_entire_binding(),
+                resource: material_buffer.as_entire_binding(),
             }],
         });
 

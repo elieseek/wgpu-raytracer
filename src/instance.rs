@@ -35,6 +35,7 @@ impl Sphere {
 pub struct Mesh {
     pub positions: Vec<[f32; 4]>,
     pub indices: Vec<[u32; 4]>,
+    pub material_id: u32,
 }
 
 impl Mesh {
@@ -42,6 +43,7 @@ impl Mesh {
         Mesh {
             positions: vec![],
             indices: vec![],
+            material_id: 0,
         }
     }
 
@@ -71,7 +73,7 @@ impl Mesh {
                     let indices: Vec<[u32; 4]> = mesh
                         .indices
                         .chunks(3)
-                        .map(|i| [i[0], i[1], i[2], 0])
+                        .map(|i| [i[0], i[1], i[2], self.material_id])
                         .collect();
 
                     for p in positions {
