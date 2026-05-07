@@ -11,12 +11,16 @@ use winit::{
 use blit::RenderPass;
 use mega_kernel::ComputePass;
 use instance::{Mesh, BVH};
+use spectrum::generate_cie_to_rgb_table;
+use light::GpuLight;
 
 mod blit;
 mod camera;
 mod instance;
+mod light;
 mod material;
 mod mega_kernel;
+mod spectrum;
 // mod wavefront;
 
 pub async fn run() {
@@ -146,7 +150,7 @@ impl State {
                     required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                         | wgpu::Features::CLEAR_TEXTURE,
                     required_limits: wgpu::Limits {
-                        max_bind_groups: 6,
+                        max_bind_groups: 7,
                         max_storage_buffer_binding_size: 512 * 1024 * 1024,
                         ..Default::default()
                     },
@@ -265,19 +269,9 @@ impl State {
             contents: bytemuck::cast_slice(&obj_model.positions),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
-        let normal_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("position_buffer"),
-            contents: bytemuck::cast_slice(&obj_model.normals),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("index_buffer"),
             contents: bytemuck::cast_slice(&obj_model.indices),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-        let normal_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("index_buffer"),
-            contents: bytemuck::cast_slice(&obj_model.normal_indices),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -305,26 +299,6 @@ impl State {
                         },
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                 ],
             });
 
@@ -339,14 +313,6 @@ impl State {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: index_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: normal_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: normal_index_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -430,6 +396,64 @@ impl State {
             ],
         });
 
+        let light1 = GpuLight::point([0.0, 20.0, -6.0], [1.0, 1.0, 1.0], 10.0, 5500.0);
+        let light2 = GpuLight::point([0.0, 30.0, 5.0], [1.0, 0.8, 0.5], 10.0, 3000.0);
+
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("light_buffer"),
+            contents: bytemuck::cast_slice(&[light1, light2]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let cie_data = generate_cie_to_rgb_table();
+        let cie_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cie_buffer"),
+            contents: bytemuck::cast_slice(&cie_data),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let light_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("light_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("light_bind_group"),
+            layout: &light_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: light_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: cie_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
         let scene = Scene {
             sphere_bind_group_layout,
             sphere_bind_group,
@@ -439,6 +463,8 @@ impl State {
             material_bind_group,
             bvh_bind_group_layout,
             bvh_bind_group,
+            light_bind_group_layout,
+            light_bind_group,
         };
 
         let compute_pass = ComputePass::new(&device, &size, &compute_view, &camera_uniform, &scene);
@@ -620,4 +646,6 @@ pub struct Scene {
     material_bind_group: wgpu::BindGroup,
     bvh_bind_group_layout: wgpu::BindGroupLayout,
     bvh_bind_group: wgpu::BindGroup,
+    pub light_bind_group_layout: wgpu::BindGroupLayout,
+    pub light_bind_group: wgpu::BindGroup,
 }

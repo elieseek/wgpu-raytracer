@@ -117,6 +117,7 @@ impl ComputePass {
                     Some(&scene.mesh_bind_group_layout),
                     Some(&scene.material_bind_group_layout),
                     Some(&scene.bvh_bind_group_layout),
+                    Some(&scene.light_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
@@ -187,6 +188,7 @@ impl ComputePass {
         compute_pass.set_bind_group(3, &scene.mesh_bind_group, &[]);
         compute_pass.set_bind_group(4, &scene.material_bind_group, &[]);
         compute_pass.set_bind_group(5, &scene.bvh_bind_group, &[]);
+        compute_pass.set_bind_group(6, &scene.light_bind_group, &[]);
 
         compute_pass.dispatch_workgroups(size.width / 8, size.height / 4, 1);
     }

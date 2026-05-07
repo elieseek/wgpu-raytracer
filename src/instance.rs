@@ -34,18 +34,14 @@ impl Sphere {
 
 pub struct Mesh {
     pub positions: Vec<[f32; 4]>,
-    pub normals: Vec<[f32; 4]>,
     pub indices: Vec<[u32; 4]>,
-    pub normal_indices: Vec<[u32; 4]>,
 }
 
 impl Mesh {
     pub fn new() -> Mesh {
         Mesh {
             positions: vec![],
-            normals: vec![],
             indices: vec![],
-            normal_indices: vec![],
         }
     }
 
@@ -72,17 +68,7 @@ impl Mesh {
                         .chunks(3)
                         .map(|i| [i[0], i[1], i[2], 0.0])
                         .collect();
-                    let normals: Vec<[f32; 4]> = mesh
-                        .normals
-                        .chunks(3)
-                        .map(|i| [i[0], i[1], i[2], 0.0])
-                        .collect();
                     let indices: Vec<[u32; 4]> = mesh
-                        .indices
-                        .chunks(3)
-                        .map(|i| [i[0], i[1], i[2], 0])
-                        .collect();
-                    let normal_indices: Vec<[u32; 4]> = mesh
                         .indices
                         .chunks(3)
                         .map(|i| [i[0], i[1], i[2], 0])
@@ -91,14 +77,8 @@ impl Mesh {
                     for p in positions {
                         self.positions.push(p)
                     }
-                    for n in normals {
-                        self.normals.push(n)
-                    }
                     for i in indices {
                         self.indices.push(i)
-                    }
-                    for ni in normal_indices {
-                        self.normal_indices.push(ni)
                     }
                 }
             }
