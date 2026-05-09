@@ -13,6 +13,8 @@ pub struct Camera {
     pub horizontal: cgmath::Vector3<f32>,
     pub vertical: cgmath::Vector3<f32>,
     pub lower_left_corner: cgmath::Point3<f32>,
+    pub vfov: f32,
+    pub aspect_ratio: f32,
 }
 
 impl Camera {
@@ -45,7 +47,25 @@ impl Camera {
                 lower_left_corner.y,
                 lower_left_corner.z,
             ),
+            vfov,
+            aspect_ratio,
         }
+    }
+
+    pub fn set_vfov(&mut self, vfov: f32) {
+        self.vfov = vfov;
+        let theta = vfov * PI / 180.;
+        let h = (theta / 2.0).tan();
+        let viewport_height = 2.0 * h;
+        let viewport_width = self.aspect_ratio * viewport_height;
+
+        let u = self.horizontal.normalize();
+        let v = self.vertical.normalize();
+        let w = u.cross(v);
+
+        self.horizontal = viewport_width * u;
+        self.vertical = viewport_height * v;
+        self.lower_left_corner = self.origin - 0.5 * self.horizontal - 0.5 * self.vertical - w;
     }
 
     pub fn get_uniform(&self) -> CameraUniform {

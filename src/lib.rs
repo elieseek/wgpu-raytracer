@@ -219,7 +219,7 @@ impl State {
 
         let mat0 = material::GpuMaterial::diffuse([0.8, 0.8, 0.8]);
         let mat1 = material::GpuMaterial::diffuse([0.2, 0.85, 0.2]);
-        let mat2 = material::GpuMaterial::dielectric(1.5, 0.0);
+        let mat2 = material::GpuMaterial::dielectric(1.5, 0.01);
         let mat3 = material::GpuMaterial::diffuse([0.85, 0.2, 0.2]);
 
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -229,9 +229,9 @@ impl State {
         });
 
         let sphere1: instance::Sphere =
-            instance::Sphere::new(0, 1.0, cgmath::vec3(0.0, 1.0, -1.0), cgmath::Deg(0.0));
+            instance::Sphere::new(1, 1.0, cgmath::vec3(0.0, 1.0, -1.0), cgmath::Deg(0.0));
         let sphere2 =
-            instance::Sphere::new(1, 1000.0, cgmath::vec3(0.0, -1000.0, 0.0), cgmath::Deg(0.0));
+            instance::Sphere::new(0, 1000.0, cgmath::vec3(0.0, -1000.0, 0.0), cgmath::Deg(0.0));
         let sphere3 = instance::Sphere::new(2, 1.0, cgmath::vec3(0.0, 1.0, 1.0), cgmath::Deg(0.0));
 
         let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -265,8 +265,10 @@ impl State {
         });
 
         let mut obj_model = Mesh::new();
-        obj_model.material_id = 2; // grey diffuse
-        obj_model.load_obj("res/monkey.obj").await;
+        obj_model.material_id = 3;
+        obj_model.translation = cgmath::vec3(0.0, 3.0, 5.0);
+        obj_model.scale = 0.5;
+        obj_model.load_obj("res/glass.obj").await;
 
         let position_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("position_buffer"),
@@ -401,8 +403,8 @@ impl State {
         });
 
         let light1 = GpuLight::square_area(
-            [0.0, 10.0, 0.0], [0.0, -1.0, 0.0], 3.0,
-            [1.0, 1.0, 1.0], 0.5, 5500.0,
+            [10.0, 3.0, 0.0], [-1.0, -0.0, 0.0], 3.0,
+            [1.0, 1.0, 1.0], 1.0, 5500.0,
         );
 
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -649,6 +651,18 @@ impl State {
                 self.tonemap_sat = (self.tonemap_sat * 20.0 - 1.0) / 20.0;
                 if self.tonemap_sat < 0.0 { self.tonemap_sat = 0.0; }
                 self.render_pass.update_tonemap(&self.queue, self.tonemap_key, self.tonemap_sat);
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scroll = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.01,
+                };
+                let mut new_vfov = self.camera.vfov - scroll * 0.5;
+                new_vfov = new_vfov.clamp(10.0, 170.0);
+                self.camera.set_vfov(new_vfov);
+                self.clear_flag = true;
+                self.camera_uniform = self.camera.get_uniform();
+                self.compute_pass.update(&self.queue, self.camera_uniform);
             }
             WindowEvent::MouseInput {
                 state: winit::event::ElementState::Pressed,

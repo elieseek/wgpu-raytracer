@@ -1,5 +1,5 @@
 use bytemuck::Zeroable;
-use cgmath::{Rotation3, Point3, ElementWise};
+use cgmath::{Rotation3, Point3, Vector3, Vector4, Matrix4, ElementWise, Deg};
 use tobj::{self, LoadOptions};
 
 #[repr(C)]
@@ -36,6 +36,9 @@ pub struct Mesh {
     pub positions: Vec<[f32; 4]>,
     pub indices: Vec<[u32; 4]>,
     pub material_id: u32,
+    pub translation: Vector3<f32>,
+    pub rotation: Deg<f32>,
+    pub scale: f32,
 }
 
 impl Mesh {
@@ -44,6 +47,9 @@ impl Mesh {
             positions: vec![],
             indices: vec![],
             material_id: 0,
+            translation: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Deg(0.0),
+            scale: 1.0,
         }
     }
 
@@ -65,10 +71,19 @@ impl Mesh {
                         mesh.indices.len()
                     );
 
+                    let quat = cgmath::Quaternion::from_axis_angle(Vector3::unit_y(), self.rotation);
+                    let scale_mat = Matrix4::from_nonuniform_scale(self.scale, self.scale, self.scale);
+                    let rot_mat = Matrix4::from(quat);
+                    let trans_mat = Matrix4::from_translation(self.translation);
+                    let xform = trans_mat * rot_mat * scale_mat;
+
                     let positions: Vec<[f32; 4]> = mesh
                         .positions
                         .chunks(3)
-                        .map(|i| [i[0], i[1], i[2], 0.0])
+                        .map(|i| {
+                            let p = xform * Vector4::new(i[0], i[1], i[2], 1.0);
+                            [p.x, p.y, p.z, 0.0]
+                        })
                         .collect();
                     let indices: Vec<[u32; 4]> = mesh
                         .indices
