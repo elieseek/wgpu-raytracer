@@ -11,7 +11,6 @@ use winit::{
 use blit::RenderPass;
 use mega_kernel::ComputePass;
 use instance::{Mesh, BVH};
-use spectrum::generate_cie_to_rgb_table;
 use light::GpuLight;
 
 mod blit;
@@ -21,6 +20,7 @@ mod light;
 mod material;
 mod mega_kernel;
 mod spectrum;
+mod tonemap;
 // mod wavefront;
 
 pub async fn run() {
@@ -124,6 +124,8 @@ struct State {
     compute_pass: ComputePass,
     render_pass: RenderPass,
     clear_flag: bool,
+    tonemap_key: f32,
+    tonemap_sat: f32,
 }
 
 impl State {
@@ -218,10 +220,11 @@ impl State {
         let mat0 = material::GpuMaterial::diffuse([0.8, 0.8, 0.8]);
         let mat1 = material::GpuMaterial::diffuse([0.2, 0.85, 0.2]);
         let mat2 = material::GpuMaterial::dielectric(1.5, 0.0);
+        let mat3 = material::GpuMaterial::diffuse([0.85, 0.2, 0.2]);
 
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("material_buffer"),
-            contents: bytemuck::cast_slice(&[mat0, mat1, mat2]),
+            contents: bytemuck::cast_slice(&[mat0, mat1, mat2, mat3]),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -397,19 +400,14 @@ impl State {
             ],
         });
 
-        let light1 = GpuLight::point([0.0, 20.0, -6.0], [1.0, 1.0, 1.0], 10.0, 5500.0);
-        let light2 = GpuLight::point([0.0, 30.0, 5.0], [1.0, 0.8, 0.5], 10.0, 3000.0);
+        let light1 = GpuLight::square_area(
+            [0.0, 10.0, 0.0], [0.0, -1.0, 0.0], 3.0,
+            [1.0, 1.0, 1.0], 0.5, 5500.0,
+        );
 
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("light_buffer"),
-            contents: bytemuck::cast_slice(&[light1, light2]),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let cie_data = generate_cie_to_rgb_table();
-        let cie_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("cie_buffer"),
-            contents: bytemuck::cast_slice(&cie_data),
+            contents: bytemuck::cast_slice(&[light1]),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -427,32 +425,23 @@ impl State {
                         },
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                 ],
             });
 
         let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("light_bind_group"),
             layout: &light_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: light_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: cie_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            }],
+        });
+
+        let vispoint_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vispoint_buffer"),
+            size: (size.width * size.height) as u64 * 64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         let scene = Scene {
@@ -466,6 +455,7 @@ impl State {
             bvh_bind_group,
             light_bind_group_layout,
             light_bind_group,
+            vispoint_buffer,
         };
 
         let compute_pass = ComputePass::new(&device, &size, &compute_view, &camera_uniform, &scene);
@@ -490,6 +480,8 @@ impl State {
             compute_pass,
             render_pass,
             clear_flag,
+            tonemap_key: 0.8,
+            tonemap_sat: 1.0,
         }
     }
 
@@ -576,7 +568,7 @@ impl State {
             self.compute_view = self.compute_texture.create_view(&Default::default());
 
             self.compute_pass
-                .resize(&self.device, &new_size, &self.compute_view);
+                .resize(&self.device, &new_size, &self.compute_view, &self.scene.vispoint_buffer);
             self.render_pass.resize(&self.device, &self.compute_view);
         }
     }
@@ -604,6 +596,59 @@ impl State {
                     .set_cursor_grab(CursorGrabMode::None)
                     .unwrap();
                 self.window.set_cursor_visible(true);
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state: ElementState::Pressed,
+                        physical_key: PhysicalKey::Code(KeyCode::Equal),
+                        ..
+                    },
+                ..
+            } => {
+                self.tonemap_key = (self.tonemap_key * 20.0 + 1.0) / 20.0;
+                self.render_pass.update_tonemap(&self.queue, self.tonemap_key, self.tonemap_sat);
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state: ElementState::Pressed,
+                        physical_key: PhysicalKey::Code(KeyCode::Minus),
+                        ..
+                    },
+                ..
+            } => {
+                self.tonemap_key = (self.tonemap_key * 20.0 - 1.0) / 20.0;
+                if self.tonemap_key < 0.05 {
+                    self.tonemap_key = 0.05;
+                }
+                self.render_pass.update_tonemap(&self.queue, self.tonemap_key, self.tonemap_sat);
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state: ElementState::Pressed,
+                        physical_key: PhysicalKey::Code(KeyCode::BracketRight),
+                        ..
+                    },
+                ..
+            } => {
+                self.tonemap_sat = (self.tonemap_sat * 20.0 + 1.0) / 20.0;
+                if self.tonemap_sat > 3.0 { self.tonemap_sat = 3.0; }
+                self.render_pass.update_tonemap(&self.queue, self.tonemap_key, self.tonemap_sat);
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        state: ElementState::Pressed,
+                        physical_key: PhysicalKey::Code(KeyCode::BracketLeft),
+                        ..
+                    },
+                ..
+            } => {
+                self.tonemap_sat = (self.tonemap_sat * 20.0 - 1.0) / 20.0;
+                if self.tonemap_sat < 0.0 { self.tonemap_sat = 0.0; }
+                self.render_pass.update_tonemap(&self.queue, self.tonemap_key, self.tonemap_sat);
             }
             WindowEvent::MouseInput {
                 state: winit::event::ElementState::Pressed,
@@ -649,4 +694,5 @@ pub struct Scene {
     bvh_bind_group: wgpu::BindGroup,
     pub light_bind_group_layout: wgpu::BindGroupLayout,
     pub light_bind_group: wgpu::BindGroup,
+    pub vispoint_buffer: wgpu::Buffer,
 }

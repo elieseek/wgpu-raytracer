@@ -1,8 +1,14 @@
+use wgpu::util::DeviceExt;
+
+use crate::tonemap::TonemapUniform;
+
 pub struct RenderPass {
     pub render_pipeline: wgpu::RenderPipeline,
-    pub copy_bind_group: wgpu::BindGroup,
-    pub copy_bind_group_layout: wgpu::BindGroupLayout,
+    pub bind_group: wgpu::BindGroup,
+    pub bind_group_layout: wgpu::BindGroupLayout,
     pub sampler: wgpu::Sampler,
+    pub tonemap_buffer: wgpu::Buffer,
+    pub tonemap_params: TonemapUniform,
 }
 
 impl RenderPass {
@@ -12,36 +18,45 @@ impl RenderPass {
         source_view: &wgpu::TextureView,
     ) -> Self {
         let copy_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Copy Shader"),
+            label: Some("Blit Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("kernels/blit.wgsl").into()),
         });
 
-        let copy_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("copy_bind_group_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("blit_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pipeline_layout"),
-            bind_group_layouts: &[Some(&copy_bind_group_layout)],
+            label: Some("blit_pipeline_layout"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -81,9 +96,20 @@ impl RenderPass {
             ..Default::default()
         });
 
-        let copy_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("copy_bind_group"),
-            layout: &copy_bind_group_layout,
+        let tonemap_params = TonemapUniform {
+            key: 0.8,
+            saturation: 1.0,
+        };
+
+        let tonemap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tonemap_buffer"),
+            contents: bytemuck::bytes_of(&tonemap_params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit_bind_group"),
+            layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -93,23 +119,25 @@ impl RenderPass {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: tonemap_buffer.as_entire_binding(),
+                },
             ],
         });
 
         Self {
             render_pipeline,
-            copy_bind_group,
-            copy_bind_group_layout,
+            bind_group,
+            bind_group_layout,
             sampler,
+            tonemap_buffer,
+            tonemap_params,
         }
     }
 
-    pub fn render(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
-    ) {
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
@@ -125,15 +153,24 @@ impl RenderPass {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.copy_bind_group, &[]);
-        render_pass.draw(0..3, 0..2);
+        rp.set_pipeline(&self.render_pipeline);
+        rp.set_bind_group(0, &self.bind_group, &[]);
+        rp.draw(0..3, 0..2);
+    }
+
+    pub fn update_tonemap(&mut self, queue: &wgpu::Queue, key: f32, saturation: f32) {
+        self.tonemap_params = TonemapUniform { key, saturation };
+        queue.write_buffer(
+            &self.tonemap_buffer,
+            0,
+            bytemuck::bytes_of(&self.tonemap_params),
+        );
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, source_view: &wgpu::TextureView) {
-        self.copy_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("copy_bind_group"),
-            layout: &self.copy_bind_group_layout,
+        self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit_bind_group"),
+            layout: &self.bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -142,6 +179,10 @@ impl RenderPass {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.tonemap_buffer.as_entire_binding(),
                 },
             ],
         });

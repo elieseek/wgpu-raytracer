@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![allow(clippy::excessive_precision)]
 
 // CIE 1931 2° standard observer, 380-780nm at 5nm steps
